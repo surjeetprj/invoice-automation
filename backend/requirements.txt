@@ -1,0 +1,15 @@
+fastapi[standard]
+uvicorn[standard]
+sqlalchemy[asyncio]
+aiosqlite
+asyncpg
+python-multipart
+pdfplumber
+Pillow
+pydantic>=2.0
+python-dotenv
+langgraph
+langchain
+langchain-google-genai
+langchain-huggingface
+pypdf
