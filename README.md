@@ -18,17 +18,13 @@ Your structured B2B GST extraction is orchestrated via a cyclic state machine bu
 
 ```mermaid
 graph TD
-    Start([Document Uploaded]) --> Extract[extraction_node<br>Gemini 2.5 Flash Parsing]
-    Extract --> Normalize[normalization_node<br>Clean amounts, derive PAN & state codes]
-    Normalize --> Validate[validation_node<br>GST business-rules & math checks]
-    Validate --> Condition{should_retry?<br>Check errors & retry limit}
-    Condition -- "No errors OR Retries >= 2" --> End([END<br>Transition to Pending Review])
-    Condition -- "Errors present & Retries < 2" --> Retry[Self-Correction Node<br>Feed validation errors back to LLM context]
+    Start([Upload PDF]) --> Extract[extraction_node<br>AI LLM GST Parsing]
+    Extract --> Normalize[normalization_node<br>Data Sanitization]
+    Normalize --> Validate[validation_node<br>GST & Math Checks]
+    Validate --> Condition{Retry Check}
+    Condition -- "Passed / Limit Reached" --> End([END: Pending Review])
+    Condition -- "Failed (Retry < 2)" --> Retry[self_correct_node<br>Feedback Error Logs]
     Retry --> Extract
-
-    style Start fill:#f9f,stroke:#333,stroke-width:2px
-    style End fill:#bbf,stroke:#333,stroke-width:2px
-    style Condition fill:#ff9,stroke:#333,stroke-width:2px
 ```
 
 ---
