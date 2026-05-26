@@ -8,9 +8,28 @@ This platform replaces slow, manual data entry with an **Agentic Self-Healing Ex
 
 ## 📐 Architecture & System Flow
 
-The diagram below illustrates the document ingestion, spatial layout-preserving text extraction, scanned document routing, and LLM-driven agent extraction flow:
+### 1. Document Ingestion Pipeline
+The diagram below illustrates the high-level document ingestion, spatial layout-preserving text extraction, scanned document routing, and LLM-driven agent extraction flow:
 
 ![Architecture Diagram](docs/assets/architecture_diagram.png)
+
+### 2. LangGraph Agentic Flow State Machine
+Your structured B2B GST extraction is orchestrated via a cyclic state machine built on **LangGraph**. The pipeline handles autonomous Gemini 2.5 Flash parsing, post-extraction normalization, multi-layered business validation, and a self-healing correction loop:
+
+```mermaid
+graph TD
+    Start([Document Uploaded]) --> Extract[extraction_node<br>Gemini 2.5 Flash Parsing]
+    Extract --> Normalize[normalization_node<br>Clean amounts, derive PAN & state codes]
+    Normalize --> Validate[validation_node<br>GST business-rules & math checks]
+    Validate --> Condition{should_retry?<br>Check errors & retry limit}
+    Condition -- "No errors OR Retries >= 2" --> End([END<br>Transition to Pending Review])
+    Condition -- "Errors present & Retries < 2" --> Retry[Self-Correction Node<br>Feed validation errors back to LLM context]
+    Retry --> Extract
+
+    style Start fill:#f9f,stroke:#333,stroke-width:2px
+    style End fill:#bbf,stroke:#333,stroke-width:2px
+    style Condition fill:#ff9,stroke:#333,stroke-width:2px
+```
 
 ---
 
@@ -143,8 +162,3 @@ invoice_automation/
    npm run dev
    ```
 4. Access the web dashboard at: [http://localhost:3000](http://localhost:3000)
-
----
-
-## 🛡️ License
-Distributed under the MIT License. See `LICENSE` for more information.
