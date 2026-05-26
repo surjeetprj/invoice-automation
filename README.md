@@ -6,6 +6,14 @@ This platform replaces slow, manual data entry with an **Agentic Self-Healing Ex
 
 ---
 
+## 📐 Architecture & System Flow
+
+The diagram below illustrates the document ingestion, spatial layout-preserving text extraction, scanned document routing, and LLM-driven agent extraction flow:
+
+![Architecture Diagram](docs/assets/architecture_diagram.png)
+
+---
+
 ## 🚀 Key Architectural Features
 
 ### 1. LangGraph-Driven Agentic Pipeline & Self-Correction
@@ -31,6 +39,15 @@ This platform replaces slow, manual data entry with an **Agentic Self-Healing Ex
 
 ---
 
+## 🖥️ User Interface & Dashboard Screenshots
+
+### Invoices & Review Dashboard
+The platform features a modern React/Next.js dashboard that displays all processed invoices, visualizes processing times and status categories (Needs Review, Posted, Rejected) at a glance, showcases dynamic evidence-based confidence ratings, and provides actions for human-in-the-loop manual review.
+
+![Invoices Dashboard](docs/assets/dashboard_screenshot.png)
+
+---
+
 ## 🛠️ Technology Stack
 
 | Component | Technologies Used |
@@ -49,6 +66,8 @@ This platform replaces slow, manual data entry with an **Agentic Self-Healing Ex
 
 ```directory
 invoice_automation/
+├── docs/                     # Documentation Assets
+│   └── assets/               # Architecture diagrams and UI screenshots
 ├── backend/                  # FastAPI Application Codebase
 │   ├── services/             # Core Core Processing Pipelines
 │   │   ├── ai_parser.py      # LangGraph state machine & LLM interface
