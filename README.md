@@ -56,10 +56,15 @@ graph TD
 
 ## 🖥️ User Interface & Dashboard Screenshots
 
-### Invoices & Review Dashboard
-The platform features a modern React/Next.js dashboard that displays all processed invoices, visualizes processing times and status categories (Needs Review, Posted, Rejected) at a glance, showcases dynamic evidence-based confidence ratings, and provides actions for human-in-the-loop manual review.
+### 1. Processing Pipeline Dashboard
+The React/Next.js dashboard provides high-level KPI metrics (Total Invoices, Avg Processing Time, Accuracy Rate, Pending Review counts) and visualizes the status distribution of processed documents in real-time.
 
-![Invoices Dashboard](docs/assets/dashboard_screenshot.png)
+![Pipeline Dashboard](docs/assets/dashboard_overview.png)
+
+### 2. Invoices & Action Review Lists
+The central invoices table tracks extracted filenames, extraction dates, validation status badges, dynamic confidence scores, and action hooks for human-in-the-loop review.
+
+![Invoices List](docs/assets/invoices_list.png)
 
 ---
 
