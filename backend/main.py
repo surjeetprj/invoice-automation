@@ -47,7 +47,7 @@ from schemas import (
 from services.exporter import export_invoice_csv, export_invoice_json
 from services.tally_exporter import export_invoice_tally
 from services.erpnext_exporter import export_to_erpnext
-from services.doc_extraction_engine import extract_with_metadata, initialize_ocr, ScannedDocumentException
+from services.doc_extraction_engine import extract_with_metadata, initialize_parser, ScannedDocumentException
 from services.ai_parser import parse_invoice
 from services.validator import validate_invoice, calculate_confidence_score
 from services.reviewer import apply_review_decision, get_review_payload
@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Starting Invoice Automation…")
     await init_db()
     logger.info("✅ Database initialised.")
-    initialize_ocr()
+    initialize_parser()
     yield
     logger.info("👋 Shutting down.")
 

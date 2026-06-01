@@ -86,7 +86,7 @@ class ExtractionMetadata:
     quality_notes: list[str] = field(default_factory=list)
 
 
-def initialize_ocr():
+def initialize_parser():
     """Lightweight initialization for layout-preserving pdfplumber parser."""
     logger.info("pdfplumber Layout Engine initialized (High-Speed Rule-Based Mode).")
 
