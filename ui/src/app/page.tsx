@@ -60,7 +60,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-foreground">
-              {Math.round(stats?.avg_processing_time_ms || 0)} <span className="text-lg">ms</span>
+              {((stats?.avg_processing_time_ms || 0) / 1000).toFixed(2)} <span className="text-lg">s</span>
             </div>
             <p className="text-xs text-muted-foreground mt-1">Per document</p>
           </CardContent>

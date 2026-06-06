@@ -2,7 +2,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 // Replace with a real API key in production
 const API_HEADERS = {
-  "X-API-Key": "test_api_key_123",
+  "X-API-Key": "poc-secret-key-change-me",
   "Content-Type": "application/json",
 };
 
@@ -39,7 +39,7 @@ export const api = {
     // fetch will set it to multipart/form-data with the correct boundary automatically.
     const res = await fetch(`${API_BASE_URL}/process-invoice`, {
       method: "POST",
-      headers: { "X-API-Key": "test_api_key_123" },
+      headers: { "X-API-Key": "poc-secret-key-change-me" },
       body: formData,
     });
     

@@ -20,8 +20,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
 from langgraph.graph import StateGraph, END
 
-from config import GOOGLE_API_KEY, STATE_CODES
-from schemas import InvoiceData, LineItem, TaxDetail, SupplyType
+from config import GOOGLE_API_KEY
+from schemas import InvoiceData, SupplyType
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +107,16 @@ Determine `supply_type` by comparing the first 2 digits of vendor GSTIN and cust
 - Extract `reverse_charge` as "Y" or "N" if mentioned.
 - Extract `round_off` amount if the invoice rounds to nearest rupee.
 
+### Date Formatting (CRITICAL)
+- ALL date fields (`date`, `ack_date`, `e_way_bill_date`, etc.) MUST be returned in **DD-MM-YYYY** format.
+- Convert any date you encounter into this format regardless of the original style:
+  - `1-May-26` → `01-05-2026`
+  - `01/05/2026` → `01-05-2026`
+  - `2026-05-01` → `01-05-2026`
+  - `May 1, 2026` → `01-05-2026`
+- Two-digit years (e.g. `26`) should be interpreted as `20xx` (i.e. `2026`).
+- Always zero-pad single-digit day and month (e.g. `1` → `01`, `5` → `05`).
+
 ### Math Consistency
 - `total_taxable_amount` = sum of all line item `taxable_value` fields.
 - `total_tax_amount` = sum of all tax amounts across all line items.
@@ -124,8 +134,6 @@ in the extraction quality:
 - < 0.5 = poor quality, many fields guessed or missing
 
 If you cannot find a field, leave it as null or 0.0. **Never hallucinate data.**
-
-{format_instructions}
 """
 
 # ──────────────────────────────────────────────
@@ -140,34 +148,36 @@ The previous extraction attempt had these issues. Please fix them in this attemp
 
 
 # ──────────────────────────────────────────────
+# Global LLM Client (Reused for connection pooling)
+# ──────────────────────────────────────────────
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash-lite",
+    google_api_key=GOOGLE_API_KEY,
+    temperature=0.0
+)
+structured_llm = llm.with_structured_output(InvoiceData)
+
+
+# ──────────────────────────────────────────────
 # Extraction Node (Digital-Only Mode)
 # ──────────────────────────────────────────────
 def extraction_node(state: GraphState):
     """
     Extract structured data from an invoice.
-    Uses high-speed text-based LLM extraction from the layout-preserved text.
+    Uses high-speed text-based LLM extraction with native JSON Schema structured outputs.
     """
     attempt = state["retry_count"] + 1
     logger.info(f"Extraction attempt {attempt}")
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=GOOGLE_API_KEY)
-    parser = PydanticOutputParser(pydantic_object=InvoiceData)
-
     # Build the system prompt — include previous errors on retry
-    system_content = SYSTEM_PROMPT
+    system_text = SYSTEM_PROMPT
     if state.get("previous_errors"):
-        system_content += RETRY_SUFFIX
-
-    format_instructions = parser.get_format_instructions()
-    system_text = system_content.replace("{format_instructions}", format_instructions)
-    if state.get("previous_errors"):
-        system_text = system_text.replace(
+        system_text += RETRY_SUFFIX.replace(
             "{previous_errors}",
             "\n".join(f"- {e}" for e in state["previous_errors"])
         )
 
     try:
-        # ── Text path: construct messages directly to bypass ChatPromptTemplate brace parsing bug ──
         human_text = (
             f"Invoice Markdown:\n\n{state['raw_markdown']}\n\n"
             f"Vendor Hint: {state['vendor_hint'] or 'Unknown'}"
@@ -178,8 +188,7 @@ def extraction_node(state: GraphState):
             HumanMessage(content=human_text)
         ]
 
-        raw_response = llm.invoke(messages)
-        result = parser.parse(raw_response.content)
+        result = structured_llm.invoke(messages)
 
         return {
             "extracted_data": result.model_dump(),

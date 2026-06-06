@@ -143,7 +143,7 @@ export default function InvoiceDetailPage() {
       if (format === "erpnext") {
         const res = await fetch(url, {
           headers: {
-            "X-API-Key": "test_api_key_123"
+            "X-API-Key": "poc-secret-key-change-me"
           }
         });
         if (!res.ok) {
@@ -161,7 +161,7 @@ export default function InvoiceDetailPage() {
       } else {
         const res = await fetch(url, {
           headers: {
-            "X-API-Key": "test_api_key_123"
+            "X-API-Key": "poc-secret-key-change-me"
           }
         });
         if (!res.ok) {
@@ -417,7 +417,7 @@ export default function InvoiceDetailPage() {
               </Badge>
               <div className="flex items-center gap-1.5 text-muted-foreground font-medium">
                 <Clock className="w-3.5 h-3.5" />
-                {invoice.processing_time_ms}ms
+                {invoice.processing_time_ms ? `${(invoice.processing_time_ms / 1000).toFixed(2)}s` : "0.00s"}
               </div>
               {invoice.confidence_score !== null && (
                 <div className="flex items-center gap-2 text-muted-foreground font-medium">
