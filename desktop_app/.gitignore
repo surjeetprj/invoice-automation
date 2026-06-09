@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+
+runtime/uploads/
+runtime/exports/
+runtime/logs/
+runtime/*.db
+runtime/*.sqlite3

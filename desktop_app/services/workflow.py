@@ -1,0 +1,343 @@
+from __future__ import annotations
+
+"""In-process application workflow used by the PySide6 desktop UI."""
+
+import json
+import logging
+import shutil
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy import func, select
+
+from config import ALLOWED_EXTENSIONS, DUPLICATE_CHECK_ENABLED, InvoiceStatus, UPLOAD_DIR
+from database import AuditLog, Invoice, init_db, session_scope
+from schemas import (
+    AuditLogRecord,
+    DashboardStats,
+    InvoiceData,
+    InvoiceRecord,
+    InvoiceReviewRequest,
+    ReviewDecision,
+    ValidationResult,
+)
+from services.ai_parser import parse_invoice
+from services.exporters import export_invoice_csv, export_invoice_json, export_invoice_tally, export_to_erpnext
+from services.extraction import ScannedDocumentException, extract_with_metadata, validate_file
+from services.validator import calculate_confidence_score, validate_invoice
+
+logger = logging.getLogger(__name__)
+
+
+class DesktopWorkflow:
+    """Facade for all invoice operations used by the desktop UI."""
+
+    def initialize(self) -> None:
+        """Initialize the local desktop database."""
+        logger.info("Initializing desktop database")
+        init_db()
+
+    def health(self) -> dict[str, str]:
+        """Return a lightweight readiness payload."""
+        self.initialize()
+        return {"status": "healthy", "service": "Invoice AI Desktop"}
+
+    def stats(self) -> dict[str, Any]:
+        """Calculate dashboard statistics from the local database."""
+        self.initialize()
+        logger.info("Loading dashboard stats")
+        with session_scope() as db:
+            total = db.scalar(select(func.count(Invoice.id))) or 0
+            avg_time = db.scalar(select(func.avg(Invoice.processing_time_ms)))
+            avg_conf = db.scalar(select(func.avg(Invoice.confidence_score)))
+            by_status = {
+                status: db.scalar(select(func.count(Invoice.id)).where(Invoice.status == status)) or 0
+                for status in InvoiceStatus.ALL
+            }
+            by_status = {key: value for key, value in by_status.items() if value > 0}
+            approved = db.scalar(select(func.count(Invoice.id)).where(Invoice.status.in_([InvoiceStatus.APPROVED, InvoiceStatus.POSTED]))) or 0
+            stats = DashboardStats(
+                total_invoices=total,
+                by_status=by_status,
+                status_distribution=by_status,
+                avg_processing_time_ms=round(float(avg_time), 1) if avg_time else None,
+                avg_confidence_score=round(float(avg_conf), 2) if avg_conf else None,
+                total_pending_review=by_status.get(InvoiceStatus.PENDING_REVIEW, 0),
+                total_approved=approved,
+                total_rejected=by_status.get(InvoiceStatus.REJECTED, 0),
+            )
+            return stats.model_dump(mode="json")
+
+    def list_invoices(self, skip: int = 0, limit: int = 100) -> dict[str, Any]:
+        """Return paginated invoice records for the invoice list page."""
+        self.initialize()
+        logger.info("Listing invoices skip=%s limit=%s", skip, limit)
+        with session_scope() as db:
+            total = db.scalar(select(func.count(Invoice.id))) or 0
+            rows = db.scalars(
+                select(Invoice).order_by(Invoice.created_at.desc()).offset(skip).limit(limit)
+            ).all()
+            return {"total": total, "invoices": [self.invoice_to_record(row).model_dump(mode="json") for row in rows]}
+
+    def get_invoice(self, invoice_id: int) -> dict[str, Any]:
+        """Return one invoice record by ID."""
+        self.initialize()
+        logger.info("Loading invoice #%s", invoice_id)
+        with session_scope() as db:
+            invoice = self.require_invoice(db, invoice_id)
+            return self.invoice_to_record(invoice).model_dump(mode="json")
+
+    def get_pdf_path(self, invoice_id: int) -> Path:
+        """Return the local PDF path for an invoice."""
+        self.initialize()
+        logger.info("Resolving PDF path for invoice #%s", invoice_id)
+        with session_scope() as db:
+            invoice = self.require_invoice(db, invoice_id)
+            path = Path(invoice.file_path)
+            if not path.exists():
+                raise FileNotFoundError(f"Invoice file not found: {path}")
+            return path
+
+    def upload_invoice(self, source_path: str | Path) -> dict[str, Any]:
+        """Copy, process, persist, and return a newly uploaded invoice."""
+        self.initialize()
+        source = Path(source_path)
+        logger.info("Upload requested: %s", source)
+        if source.suffix.lower() not in ALLOWED_EXTENSIONS:
+            raise ValueError("Only PDF invoices are supported.")
+        validate_file(source)
+        target = self.unique_upload_path(source.name)
+        shutil.copy2(source, target)
+
+        with session_scope() as db:
+            invoice = Invoice(filename=source.name, file_path=str(target), status=InvoiceStatus.NEW)
+            db.add(invoice)
+            db.commit()
+            db.refresh(invoice)
+            self.log(db, invoice.id, "Invoice uploaded", reason=f"File: {source.name}")
+            if DUPLICATE_CHECK_ENABLED:
+                duplicate = db.scalar(
+                    select(Invoice.id).where(Invoice.filename == source.name, Invoice.id != invoice.id)
+                )
+                if duplicate:
+                    self.log(db, invoice.id, f"WARNING: Duplicate filename '{source.name}' detected")
+            try:
+                self.run_pipeline(db, invoice, target)
+            except ScannedDocumentException as exc:
+                invoice.status = InvoiceStatus.REJECTED
+                db.commit()
+                self.log(db, invoice.id, f"Pipeline rejected: {exc}")
+                raise
+            except Exception as exc:
+                logger.exception("Pipeline error for invoice %s", invoice.id)
+                invoice.status = InvoiceStatus.PENDING_REVIEW
+                db.commit()
+                self.log(db, invoice.id, f"Pipeline error: {exc}")
+            db.refresh(invoice)
+            return self.invoice_to_record(invoice).model_dump(mode="json")
+
+    def reprocess_invoice(self, invoice_id: int) -> dict[str, Any]:
+        """Run the extraction pipeline again for an existing invoice."""
+        self.initialize()
+        logger.info("Reprocess requested for invoice #%s", invoice_id)
+        with session_scope() as db:
+            invoice = self.require_invoice(db, invoice_id)
+            path = Path(invoice.file_path)
+            if not path.exists():
+                raise FileNotFoundError(f"Original file not found: {path}")
+            self.log(db, invoice.id, "Reprocessing triggered", user="human")
+            self.run_pipeline(db, invoice, path)
+            db.refresh(invoice)
+            return self.invoice_to_record(invoice).model_dump(mode="json")
+
+    def submit_review(self, invoice_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        """Apply a reviewer decision and return the updated invoice."""
+        self.initialize()
+        review = InvoiceReviewRequest(**payload)
+        logger.info("Review submitted for invoice #%s: %s", invoice_id, review.decision.value)
+        with session_scope() as db:
+            invoice = self.require_invoice(db, invoice_id)
+            if invoice.status not in {InvoiceStatus.PENDING_REVIEW, InvoiceStatus.EXTRACTED, InvoiceStatus.REJECTED}:
+                raise ValueError(f"Cannot review invoice in '{invoice.status}' status")
+            now = datetime.now(timezone.utc)
+            if review.decision == ReviewDecision.APPROVE:
+                invoice.status = InvoiceStatus.APPROVED
+                invoice.reviewed_by = review.reviewer
+                invoice.reviewed_at = now
+                self.log(db, invoice.id, "HITL: Invoice APPROVED - status set to Approved", user=review.reviewer)
+            elif review.decision == ReviewDecision.APPROVE_WITH_CORRECTIONS:
+                current = json.loads(invoice.extracted_data or "{}")
+                changed = []
+                for field, value in (review.corrections or {}).items():
+                    if current.get(field) != value:
+                        self.log(db, invoice.id, f"HITL: Field '{field}' corrected", reason="Manual correction during review", user=review.reviewer)
+                        current[field] = value
+                        changed.append(field)
+                data = InvoiceData(**current)
+                validation = validate_invoice(data)
+                invoice.extracted_data = json.dumps(data.model_dump(mode="json"))
+                invoice.validation_result = json.dumps(validation.model_dump(mode="json"))
+                invoice.invoice_number_extracted = data.invoice_number
+                invoice.vendor_gstin = data.vendor_gstin
+                invoice.supply_type = data.supply_type.value if data.supply_type else None
+                invoice.status = InvoiceStatus.APPROVED
+                invoice.reviewed_by = review.reviewer
+                invoice.reviewed_at = now
+                self.log(db, invoice.id, f"HITL: Invoice APPROVED WITH CORRECTIONS - {len(changed)} field(s) changed", user=review.reviewer)
+            elif review.decision == ReviewDecision.REJECT:
+                reason = review.rejection_reason or "No reason provided"
+                invoice.status = InvoiceStatus.REJECTED
+                invoice.reviewed_by = review.reviewer
+                invoice.reviewed_at = now
+                invoice.rejection_reason = reason
+                self.log(db, invoice.id, f"HITL: Invoice REJECTED - {reason}", reason=reason, user=review.reviewer)
+            db.commit()
+            db.refresh(invoice)
+            return self.invoice_to_record(invoice).model_dump(mode="json")
+
+    def audit_log(self, invoice_id: int) -> list[dict[str, Any]]:
+        """Return audit timeline rows for an invoice."""
+        self.initialize()
+        logger.info("Loading audit log for invoice #%s", invoice_id)
+        with session_scope() as db:
+            self.require_invoice(db, invoice_id)
+            rows = db.scalars(
+                select(AuditLog).where(AuditLog.invoice_id == invoice_id).order_by(AuditLog.timestamp.asc())
+            ).all()
+            records = [
+                AuditLogRecord(
+                    id=row.id,
+                    invoice_id=row.invoice_id,
+                    user=row.user,
+                    action=row.action,
+                    reason=row.reason,
+                    timestamp=row.timestamp,
+                ).model_dump(mode="json")
+                for row in rows
+            ]
+            logger.info("Loaded %d audit log rows for invoice #%s", len(records), invoice_id)
+            return records
+
+    def export_invoice(self, invoice_id: int, fmt: str) -> tuple[bytes | dict[str, Any], str | None]:
+        """Export an approved invoice in the requested format."""
+        self.initialize()
+        logger.info("Export requested for invoice #%s as %s", invoice_id, fmt)
+        with session_scope() as db:
+            invoice = self.require_invoice(db, invoice_id)
+            if invoice.status not in {InvoiceStatus.APPROVED, InvoiceStatus.POSTED}:
+                raise ValueError("Export only allowed from Approved or Posted status.")
+            data = InvoiceData(**json.loads(invoice.extracted_data or "{}"))
+            if fmt == "csv":
+                content, filename = export_invoice_csv(invoice_id, data)
+            elif fmt == "json":
+                content, filename = export_invoice_json(invoice_id, data)
+            elif fmt == "tally":
+                content, filename = export_invoice_tally(invoice_id, data)
+            elif fmt == "erpnext":
+                result = export_to_erpnext(data)
+                if not result.get("success"):
+                    raise ValueError(result.get("error", "ERPNext export failed"))
+                invoice.status = InvoiceStatus.POSTED
+                db.commit()
+                self.log(db, invoice.id, f"Pushed to ERPNext (Ref: {result.get('erp_reference')}) - status set to Posted")
+                return result, None
+            else:
+                raise ValueError(f"Unsupported export format: {fmt}")
+            invoice.status = InvoiceStatus.POSTED
+            db.commit()
+            self.log(db, invoice.id, f"Exported as {fmt.upper()} - status set to Posted")
+            return content, filename
+
+    def run_pipeline(self, db, invoice: Invoice, file_path: Path) -> None:
+        """Execute extraction, AI parsing, validation, and persistence."""
+        start = time.perf_counter()
+        logger.info("Pipeline started for invoice #%s: %s", invoice.id, file_path)
+        invoice.status = InvoiceStatus.IN_PROCESS
+        db.commit()
+        self.log(db, invoice.id, "Status set to In_Process")
+
+        raw_markdown, meta = extract_with_metadata(file_path)
+        logger.info("PDF extraction finished for invoice #%s: %d chars", invoice.id, meta.character_count)
+        invoice.raw_markdown = raw_markdown
+        db.commit()
+        self.log(db, invoice.id, f"PDF extraction complete - {meta.character_count} chars, {meta.page_count} pages")
+
+        parsed = parse_invoice(raw_markdown, vendor_hint=invoice.filename)
+        logger.info("AI parsing finished for invoice #%s", invoice.id)
+        data = InvoiceData(**parsed)
+        validation = validate_invoice(data)
+        confidence = calculate_confidence_score(data, validation)
+        data.confidence_score = confidence
+
+        invoice.extracted_data = json.dumps(data.model_dump(mode="json"))
+        invoice.validation_result = json.dumps(validation.model_dump(mode="json"))
+        invoice.invoice_number_extracted = data.invoice_number
+        invoice.vendor_gstin = data.vendor_gstin
+        invoice.supply_type = data.supply_type.value if data.supply_type else None
+        invoice.confidence_score = confidence
+        invoice.status = InvoiceStatus.PENDING_REVIEW
+        invoice.processing_time_ms = int((time.perf_counter() - start) * 1000)
+        db.commit()
+        logger.info("Pipeline complete for invoice #%s in %sms", invoice.id, invoice.processing_time_ms)
+        self.log(db, invoice.id, f"Pipeline complete in {invoice.processing_time_ms}ms - status set to Pending_Review")
+
+    def invoice_to_record(self, invoice: Invoice) -> InvoiceRecord:
+        """Convert an ORM invoice into a display-ready Pydantic record."""
+        extracted = None
+        validation = None
+        if invoice.extracted_data:
+            try:
+                extracted = InvoiceData(**json.loads(invoice.extracted_data))
+            except Exception:
+                logger.exception("Could not parse extracted_data for invoice %s", invoice.id)
+        if invoice.validation_result:
+            try:
+                validation = ValidationResult(**json.loads(invoice.validation_result))
+            except Exception:
+                logger.exception("Could not parse validation_result for invoice %s", invoice.id)
+        return InvoiceRecord(
+            id=invoice.id,
+            filename=invoice.filename,
+            file_path=invoice.file_path,
+            status=invoice.status,
+            supply_type=invoice.supply_type,
+            confidence_score=invoice.confidence_score,
+            raw_markdown=invoice.raw_markdown,
+            extracted_data=extracted,
+            validation=validation,
+            reviewed_by=invoice.reviewed_by,
+            reviewed_at=invoice.reviewed_at,
+            processing_time_ms=invoice.processing_time_ms,
+            rejection_reason=invoice.rejection_reason,
+            created_at=invoice.created_at,
+            updated_at=invoice.updated_at,
+        )
+
+    def require_invoice(self, db, invoice_id: int) -> Invoice:
+        """Fetch an invoice or raise a user-facing error."""
+        invoice = db.get(Invoice, invoice_id)
+        if invoice is None:
+            raise ValueError(f"Invoice {invoice_id} not found")
+        return invoice
+
+    def log(self, db, invoice_id: int, action: str, reason: str | None = None, user: str = "system") -> None:
+        """Persist one audit log row and emit the same event to app logs."""
+        logger.info("Audit invoice #%s | %s | %s", invoice_id, user, action)
+        db.add(AuditLog(invoice_id=invoice_id, user=user, action=action, reason=reason))
+        db.commit()
+
+    def unique_upload_path(self, filename: str) -> Path:
+        """Return a non-conflicting path inside the uploads directory."""
+        target = UPLOAD_DIR / filename
+        if not target.exists():
+            return target
+        stem = target.stem
+        suffix = target.suffix
+        counter = 1
+        while True:
+            candidate = UPLOAD_DIR / f"{stem}_{counter}{suffix}"
+            if not candidate.exists():
+                return candidate
+            counter += 1
