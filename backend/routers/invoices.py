@@ -28,32 +28,15 @@ from services.processor import _invoice_to_response, _log, _run_pipeline
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/invoices",
-    tags=["Invoices"]
-)
-
-# NOTE: The process-invoice and process-invoices/batch endpoints are at root in main.py,
-# but we can group them here. To keep the exact path compatibility, we will:
-# 1. Register `/process-invoice` on invoices router (which makes it /invoices/process-invoice), OR
-# 2. Register them on a separate base prefix, or use path overrides.
-# Let's register `/process-invoice` and `/process-invoices/batch` at the root path of this router
-# but customize their route paths so they match main.py perfectly!
-# If we define them on invoices router with path overrides or register them under APIRouter without a prefix,
-# that would be even easier.
-# Let's register all invoice-specific routes under router = APIRouter(tags=["Invoices"]).
-# If we don't put a prefix="/invoices", we can define paths exactly as they are in main.py, e.g.:
-# `/process-invoice`
-# `/process-invoices/batch`
-# `/invoices`
-# `/invoices/{invoice_id}`
-# This is incredibly clean because it preserves the exact API paths (no breaking changes for the frontend!).
-# Let's set prefix="" (default empty prefix) but keep tags=["Invoices"]. That's extremely smart.
-
 from routers.auth import verify_api_key
 
-# Let's change the router initialization:
-router = APIRouter(tags=["Invoices"], dependencies=[Depends(verify_api_key)])
+# Initialize the router without a global prefix because some endpoints are at the root
+# (e.g. /process-invoice) while others are at /invoices. This keeps exact frontend path compatibility.
+# All endpoints on this router are secured with API Key authentication.
+router = APIRouter(
+    tags=["Invoices"],
+    dependencies=[Depends(verify_api_key)]
+)
 
 
 # ── POST /process-invoice ─────────────────────

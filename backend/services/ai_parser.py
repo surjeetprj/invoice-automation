@@ -10,14 +10,10 @@ structured GST invoice data. Features:
 - Confidence scoring for HITL review
 """
 import logging
-import json
-import re
 from typing import TypedDict, List, Optional
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.output_parsers import PydanticOutputParser
 from langgraph.graph import StateGraph, END
 
 from config import GOOGLE_API_KEY
@@ -204,7 +200,7 @@ def extraction_node(state: GraphState):
 
 
 # ──────────────────────────────────────────────
-# Normalization Node (NEW)
+# Normalization Node 
 # ──────────────────────────────────────────────
 def normalization_node(state: GraphState):
     """
@@ -388,7 +384,7 @@ def should_retry(state: GraphState):
 
 
 # ──────────────────────────────────────────────
-# Build the Graph (4 nodes)
+# Build the Graph (3 nodes)
 # ──────────────────────────────────────────────
 workflow = StateGraph(GraphState)
 

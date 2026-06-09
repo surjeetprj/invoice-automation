@@ -1,8 +1,6 @@
 """
 SQLAlchemy ORM models for Invoice and AuditLog.
 
-Production schema with HITL review tracking, duplicate detection,
-and extraction quality metrics.
 """
 from datetime import datetime, timezone
 
