@@ -1,70 +1,66 @@
 # Invoice AI Desktop App
 
-Self-contained PySide6 desktop application for invoice upload, AI extraction,
-human review, audit logs, PDF preview, and data export.
-
-The repository is now simplified to a desktop-only app. The application code,
-configuration, tests, and local virtual environment all live under
-`desktop_app`.
+PySide6 desktop application for invoice upload, AI extraction, human review,
+audit logs, PDF preview, and export.
 
 ## Setup
 
+Use these steps when installing the app on a machine for normal use.
+
 ```powershell
-cd C:\Users\surje\Documents\invoice_automation\desktop_app
+git clone https://github.com/surjeetprj/invoice-automation.git
+cd invoice-automation\desktop_app
+
 py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -U pip
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m pytest tests -q
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+Copy-Item .env.example .env
+notepad .env
 ```
 
-## Run
+Add your Gemini API key in `.env`:
 
-From inside `desktop_app`:
+```env
+GOOGLE_API_KEY=your_gemini_key
+```
+
+Run the app:
+
+```powershell
+.\.venv\Scripts\python.exe main.py
+```
+
+## Run Later
+
+After setup is complete, start the app with:
 
 ```powershell
 cd C:\Users\surje\Documents\invoice_automation\desktop_app
 .\.venv\Scripts\python.exe main.py
 ```
 
-If `desktop_app\.venv` is already activated:
+If the virtual environment is already activated:
 
 ```powershell
-cd C:\Users\surje\Documents\invoice_automation\desktop_app
 python main.py
-```
-
-From the parent `invoice_automation` folder:
-
-```powershell
-cd C:\Users\surje\Documents\invoice_automation
-.\desktop_app\.venv\Scripts\python.exe -m desktop_app
 ```
 
 Do not run `python desktop_app` from inside the `desktop_app` folder. That asks
 Python to open a file named `desktop_app`, which does not exist.
 
-Runtime files are written to the OS app-data directory by default:
+## Developer Install
 
-- Windows: `%LOCALAPPDATA%\InvoiceAI`
-- macOS: `~/Library/Application Support/InvoiceAI`
-- Linux: `$XDG_DATA_HOME/InvoiceAI` or `~/.local/share/InvoiceAI`
+Use editable install when changing code locally.
 
-Set `DESKTOP_RUNTIME_DIR` in `.env` to override this for local testing.
-
-## Environment
-
-Optional `.env` values:
-
-```env
-GOOGLE_API_KEY=your_gemini_key
-ERPNEXT_URL=https://your-erpnext.example
-ERPNEXT_API_KEY=...
-ERPNEXT_API_SECRET=...
+```powershell
+cd C:\Users\surje\Documents\invoice_automation\desktop_app
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
-Copy `.env.example` to `.env` when configuring a machine.
+## Tests
 
-## Checks
+Run checks before committing changes:
 
 ```powershell
 cd C:\Users\surje\Documents\invoice_automation\desktop_app
