@@ -1,0 +1,145 @@
+* {
+    font-family: "Plus Jakarta Sans", "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+    color: #1f2937;
+}
+
+QMainWindow {
+    background: #f6f8fb;
+}
+
+#sidebar {
+    background: #ffffff;
+    border-right: 1px solid #e5e7eb;
+}
+
+#appTitle,
+#pageTitle {
+    font-size: 24px;
+    font-weight: 800;
+    color: #111827;
+}
+
+#sectionTitle {
+    font-weight: 700;
+    color: #334155;
+}
+
+#muted {
+    color: #64748b;
+}
+
+#kpi {
+    font-size: 30px;
+    font-weight: 800;
+    color: #0f172a;
+}
+
+QPushButton,
+QToolButton {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-weight: 600;
+}
+
+QPushButton:hover,
+QToolButton:hover {
+    background: #f1f5f9;
+}
+
+QPushButton:disabled {
+    color: #94a3b8;
+    background: #f8fafc;
+}
+
+#navButton {
+    text-align: left;
+    padding-left: 12px;
+}
+
+#navButton[active="true"] {
+    background: #e0f2fe;
+    border-color: #0284c7;
+    color: #075985;
+}
+
+QLineEdit,
+QTextEdit,
+QTableWidget {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 7px;
+}
+
+#invalidInput {
+    border: 1px solid #ef4444;
+    background: #fef2f2;
+}
+
+QTableWidget {
+    gridline-color: #e5e7eb;
+    selection-background-color: #dbeafe;
+}
+
+QHeaderView::section {
+    background: #f8fafc;
+    border: none;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 8px;
+    font-weight: 700;
+}
+
+#card,
+#subsection,
+#pdfPanel {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+}
+
+#card {
+    min-height: 104px;
+}
+
+#dropZone {
+    background: #ffffff;
+    border: 2px dashed #94a3b8;
+    border-radius: 8px;
+    min-height: 340px;
+}
+
+#dropTitle {
+    font-size: 22px;
+    font-weight: 800;
+}
+
+#statusBar {
+    min-height: 24px;
+    max-height: 24px;
+    border-radius: 6px;
+    background: #e5e7eb;
+}
+
+#warningBanner {
+    background: #fffbeb;
+    border: 1px solid #f59e0b;
+    border-radius: 6px;
+    padding: 10px;
+    color: #92400e;
+}
+
+#errorBanner {
+    background: #fef2f2;
+    border: 1px solid #ef4444;
+    border-radius: 6px;
+    padding: 10px;
+    color: #991b1b;
+}
+
+#pdfPage {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+}

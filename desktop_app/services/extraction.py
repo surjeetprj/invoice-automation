@@ -8,8 +8,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pdfplumber
+from pypdf.errors import PdfReadError
 
-from config import MAX_FILE_SIZE_MB
+from ..config import MAX_FILE_SIZE_MB
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,8 @@ def classify_pdf(file_path: Path) -> str:
         for index in range(min(2, len(reader.pages))):
             text += (reader.pages[index].extract_text() or "").strip()
         return "DIGITAL" if len(text) > 100 else "SCANNED"
+    except PdfReadError as exc:
+        raise ValueError("The PDF appears to be encrypted, corrupted, or unreadable.") from exc
     except Exception as exc:
         logger.warning("Could not classify PDF %s: %s", file_path.name, exc)
         return "SCANNED"
@@ -68,7 +71,8 @@ def validate_file(path: Path) -> list[str]:
         raise ValueError(f"File exceeds {MAX_FILE_SIZE_MB} MB limit.")
     if size_mb < 0.005:
         notes.append("Very small PDF; extraction quality may be poor.")
-    if classify_pdf(path) == "SCANNED":
+    classification = classify_pdf(path)
+    if classification == "SCANNED":
         raise ScannedDocumentException("Scanned document detected. Upload a system-generated PDF invoice.")
     return notes
 
@@ -81,8 +85,12 @@ def extract_with_metadata(file_path: str | Path) -> tuple[str, ExtractionMetadat
     text = ""
     with pdfplumber.open(path) as pdf:
         page_count = len(pdf.pages)
+        if page_count == 0:
+            raise ValueError("The PDF does not contain any pages.")
         for page in pdf.pages:
             text += page.extract_text(layout=True) or ""
+    if not text.strip():
+        raise ValueError("No selectable text was found in the PDF.")
     elapsed_ms = int((time.perf_counter() - start) * 1000)
     return text, ExtractionMetadata(
         file_name=path.name,

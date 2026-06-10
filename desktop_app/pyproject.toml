@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "invoice-ai-desktop"
+version = "0.1.0"
+description = "Self-contained PySide6 desktop invoice automation application."
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.7,<7",
+    "SQLAlchemy>=2.0,<3",
+    "pydantic>=2.7,<3",
+    "python-dotenv>=1.0,<2",
+    "pdfplumber>=0.11,<0.12",
+    "Pillow>=10.0,<12",
+    "pypdf>=4.0,<6",
+    "pypdfium2>=4.30,<5",
+    "requests>=2.31,<3",
+    "langchain-core>=0.2,<1",
+    "langchain-google-genai>=1.0,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0,<9"]
+build = ["pyinstaller>=6.0,<7"]
+
+[project.scripts]
+invoice-ai-desktop = "desktop_app.app:main"
+
+[tool.setuptools]
+packages = ["desktop_app", "desktop_app.db", "desktop_app.domain", "desktop_app.services", "desktop_app.ui", "desktop_app.ui.widgets"]
+include-package-data = true
+
+[tool.setuptools.package-dir]
+desktop_app = "."
+
+[tool.setuptools.package-data]
+desktop_app = ["resources/*.qss"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

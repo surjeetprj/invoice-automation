@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 import shutil
 import time
 from datetime import datetime, timezone
@@ -12,9 +13,10 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from config import ALLOWED_EXTENSIONS, DUPLICATE_CHECK_ENABLED, InvoiceStatus, UPLOAD_DIR
-from database import AuditLog, Invoice, init_db, session_scope
-from schemas import (
+from ..config import ALLOWED_EXTENSIONS, DUPLICATE_CHECK_ENABLED, InvoiceStatus, UPLOAD_DIR
+from ..db.models import AuditLog, Invoice
+from ..db.session import init_db, session_scope
+from ..domain.schemas import (
     AuditLogRecord,
     DashboardStats,
     InvoiceData,
@@ -23,10 +25,10 @@ from schemas import (
     ReviewDecision,
     ValidationResult,
 )
-from services.ai_parser import parse_invoice
-from services.exporters import export_invoice_csv, export_invoice_json, export_invoice_tally, export_to_erpnext
-from services.extraction import ScannedDocumentException, extract_with_metadata, validate_file
-from services.validator import calculate_confidence_score, validate_invoice
+from .ai_parser import parse_invoice
+from .exporters import export_invoice_csv, export_invoice_json, export_invoice_tally, export_to_erpnext
+from .extraction import ScannedDocumentException, extract_with_metadata, validate_file
+from ..domain.validation import calculate_confidence_score, validate_invoice
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +38,11 @@ class DesktopWorkflow:
 
     def initialize(self) -> None:
         """Initialize the local desktop database."""
+        if getattr(self, "_initialized", False):
+            return
         logger.info("Initializing desktop database")
         init_db()
+        self._initialized = True
 
     def health(self) -> dict[str, str]:
         """Return a lightweight readiness payload."""
@@ -108,21 +113,22 @@ class DesktopWorkflow:
         if source.suffix.lower() not in ALLOWED_EXTENSIONS:
             raise ValueError("Only PDF invoices are supported.")
         validate_file(source)
+        file_hash = sha256_file(source)
         target = self.unique_upload_path(source.name)
         shutil.copy2(source, target)
 
         with session_scope() as db:
-            invoice = Invoice(filename=source.name, file_path=str(target), status=InvoiceStatus.NEW)
+            invoice = Invoice(filename=source.name, file_path=str(target), file_hash=file_hash, status=InvoiceStatus.NEW)
             db.add(invoice)
             db.commit()
             db.refresh(invoice)
             self.log(db, invoice.id, "Invoice uploaded", reason=f"File: {source.name}")
             if DUPLICATE_CHECK_ENABLED:
                 duplicate = db.scalar(
-                    select(Invoice.id).where(Invoice.filename == source.name, Invoice.id != invoice.id)
+                    select(Invoice.id).where(Invoice.file_hash == file_hash, Invoice.id != invoice.id)
                 )
                 if duplicate:
-                    self.log(db, invoice.id, f"WARNING: Duplicate filename '{source.name}' detected")
+                    self.log(db, invoice.id, f"WARNING: Duplicate file content detected (matches invoice #{duplicate})")
             try:
                 self.run_pipeline(db, invoice, target)
             except ScannedDocumentException as exc:
@@ -245,9 +251,6 @@ class DesktopWorkflow:
                 return result, None
             else:
                 raise ValueError(f"Unsupported export format: {fmt}")
-            invoice.status = InvoiceStatus.POSTED
-            db.commit()
-            self.log(db, invoice.id, f"Exported as {fmt.upper()} - status set to Posted")
             return content, filename
 
     def run_pipeline(self, db, invoice: Invoice, file_path: Path) -> None:
@@ -264,16 +267,29 @@ class DesktopWorkflow:
         db.commit()
         self.log(db, invoice.id, f"PDF extraction complete - {meta.character_count} chars, {meta.page_count} pages")
 
-        parsed = parse_invoice(raw_markdown, vendor_hint=invoice.filename)
-        logger.info("AI parsing finished for invoice #%s", invoice.id)
-        data = InvoiceData(**parsed)
-        validation = validate_invoice(data)
+        try:
+            parsed = parse_invoice(raw_markdown, vendor_hint=invoice.filename)
+            logger.info("AI parsing finished for invoice #%s", invoice.id)
+            data = InvoiceData(**parsed)
+            validation = validate_invoice(data)
+        except Exception as exc:
+            logger.exception("AI parsing failed for invoice #%s", invoice.id)
+            data = InvoiceData(vendor_name=invoice.filename)
+            validation = ValidationResult(
+                is_valid=False,
+                errors=[str(exc)],
+                warnings=[],
+                issues=[{"severity": "error", "message": str(exc), "field": "AI Parser"}],
+            )
+            self.log(db, invoice.id, f"AI parsing failed: {exc}")
         confidence = calculate_confidence_score(data, validation)
         data.confidence_score = confidence
 
         invoice.extracted_data = json.dumps(data.model_dump(mode="json"))
         invoice.validation_result = json.dumps(validation.model_dump(mode="json"))
         invoice.invoice_number_extracted = data.invoice_number
+        invoice.invoice_date_extracted = data.date
+        invoice.total_amount_extracted = data.total_amount
         invoice.vendor_gstin = data.vendor_gstin
         invoice.supply_type = data.supply_type.value if data.supply_type else None
         invoice.confidence_score = confidence
@@ -301,6 +317,7 @@ class DesktopWorkflow:
             id=invoice.id,
             filename=invoice.filename,
             file_path=invoice.file_path,
+            file_hash=invoice.file_hash,
             status=invoice.status,
             supply_type=invoice.supply_type,
             confidence_score=invoice.confidence_score,
@@ -341,3 +358,12 @@ class DesktopWorkflow:
             if not candidate.exists():
                 return candidate
             counter += 1
+
+
+def sha256_file(path: Path) -> str:
+    """Return the SHA-256 hash for a file without loading it all into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

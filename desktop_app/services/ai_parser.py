@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from config import GOOGLE_API_KEY
-from schemas import InvoiceData, SupplyType
+from ..config import GOOGLE_API_KEY
+from ..domain.parsing import parse_decimal
+from ..domain.schemas import InvoiceData, SupplyType
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,7 @@ DD-MM-YYYY and do not hallucinate values."""
 def parse_invoice(raw_markdown: str, vendor_hint: str | None = None) -> dict[str, Any]:
     """Parse layout-preserved invoice text into an InvoiceData dictionary."""
     if not GOOGLE_API_KEY:
-        logger.warning("GOOGLE_API_KEY is not configured; returning empty extraction payload.")
-        return empty_invoice(vendor_hint)
+        raise RuntimeError("GOOGLE_API_KEY is not configured. AI parsing cannot run.")
 
     try:
         from langchain_core.messages import HumanMessage, SystemMessage
@@ -42,9 +42,7 @@ def parse_invoice(raw_markdown: str, vendor_hint: str | None = None) -> dict[str
         return normalize_extracted_data(data)
     except Exception as exc:
         logger.exception("AI parsing failed: %s", exc)
-        fallback = empty_invoice(vendor_hint)
-        fallback["raw_parser_error"] = str(exc)
-        return fallback
+        raise RuntimeError(f"AI parsing failed: {exc}") from exc
 
 
 def normalize_extracted_data(data: dict[str, Any]) -> dict[str, Any]:
@@ -83,15 +81,12 @@ def normalize_extracted_data(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def to_float(value: Any) -> float:
-    """Convert common invoice amount values to float."""
-    if value in (None, ""):
-        return 0.0
-    if isinstance(value, (int, float)):
-        return float(value)
+    """Convert common invoice amount values to float with shared parsing rules."""
     try:
-        return float(str(value).replace("₹", "").replace(",", "").strip())
-    except ValueError:
+        parsed = parse_decimal(value)
+    except (TypeError, ValueError):
         return 0.0
+    return float(parsed or 0.0)
 
 
 def empty_invoice(vendor_hint: str | None = None) -> dict[str, Any]:

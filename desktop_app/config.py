@@ -3,6 +3,7 @@ from __future__ import annotations
 """Configuration and runtime paths for the desktop application."""
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -11,7 +12,24 @@ from dotenv import load_dotenv
 APP_DIR = Path(__file__).resolve().parent
 load_dotenv(APP_DIR / ".env")
 
-RUNTIME_DIR = APP_DIR / "runtime"
+APP_NAME = "InvoiceAI"
+LEGACY_RUNTIME_DIR = APP_DIR / "runtime"
+
+
+def app_data_dir() -> Path:
+    """Return a platform-appropriate writable runtime directory."""
+    override = os.getenv("DESKTOP_RUNTIME_DIR")
+    if override:
+        return Path(override).expanduser()
+    if sys.platform.startswith("win"):
+        base = os.getenv("LOCALAPPDATA") or os.getenv("APPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / APP_NAME
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_NAME
+    return Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local" / "share")) / APP_NAME
+
+
+RUNTIME_DIR = app_data_dir()
 UPLOAD_DIR = RUNTIME_DIR / "uploads"
 EXPORT_DIR = RUNTIME_DIR / "exports"
 LOG_DIR = RUNTIME_DIR / "logs"
@@ -19,7 +37,7 @@ LOG_DIR = RUNTIME_DIR / "logs"
 for directory in (RUNTIME_DIR, UPLOAD_DIR, EXPORT_DIR, LOG_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 
-DATABASE_URL = os.getenv("DESKTOP_DATABASE_URL", f"sqlite:///{RUNTIME_DIR / 'invoices.db'}")
+DATABASE_URL = os.getenv("DESKTOP_DATABASE_URL", f"sqlite:///{(RUNTIME_DIR / 'invoices.db').as_posix()}")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 ERPNEXT_URL = os.getenv("ERPNEXT_URL", "")
 ERPNEXT_API_KEY = os.getenv("ERPNEXT_API_KEY", "")

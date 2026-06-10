@@ -14,8 +14,9 @@ from xml.etree.ElementTree import Element, SubElement, indent, tostring
 
 import requests
 
-from config import ERPNEXT_API_KEY, ERPNEXT_API_SECRET, ERPNEXT_URL
-from schemas import InvoiceData
+from ..config import ERPNEXT_API_KEY, ERPNEXT_API_SECRET, ERPNEXT_URL
+from ..domain.parsing import parse_date
+from ..domain.schemas import InvoiceData
 
 
 def export_invoice_csv(invoice_id: int, data: InvoiceData) -> tuple[bytes, str]:
@@ -151,14 +152,3 @@ def erp_date(value: str | None) -> str:
     dt = parse_date(value)
     return (dt or datetime.now()).strftime("%Y-%m-%d")
 
-
-def parse_date(value: str | None) -> datetime | None:
-    """Parse common invoice date formats."""
-    if not value:
-        return None
-    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y", "%d %b %Y", "%d %B %Y", "%d-%b-%Y"):
-        try:
-            return datetime.strptime(value.strip(), fmt)
-        except ValueError:
-            continue
-    return None
