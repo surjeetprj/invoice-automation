@@ -16,6 +16,26 @@ cd ..
 .\desktop_app\.venv\Scripts\python.exe -m desktop_app
 ```
 
+## Run
+
+From the parent project folder:
+
+```powershell
+cd C:\Users\surje\Documents\invoice_automation
+.\desktop_app\.venv\Scripts\python.exe -m desktop_app
+```
+
+If `desktop_app\.venv` is already activated and you are inside the
+`desktop_app` folder:
+
+```powershell
+cd C:\Users\surje\Documents\invoice_automation\desktop_app
+python main.py
+```
+
+Do not run `python desktop_app` from inside the `desktop_app` folder. That asks
+Python to open a file named `desktop_app`, which does not exist.
+
 Runtime files are written to the OS app-data directory by default:
 
 - Windows: `%LOCALAPPDATA%\InvoiceAI`
