@@ -1,8 +1,11 @@
 # Invoice AI Desktop App
 
-Self-contained PySide6 monolithic desktop application. This folder is the root
-for the desktop runtime and does not import from the project `backend` or `ui`
-folders.
+Self-contained PySide6 desktop application for invoice upload, AI extraction,
+human review, audit logs, PDF preview, and data export.
+
+The repository is now simplified to a desktop-only app. The application code,
+configuration, tests, and local virtual environment all live under
+`desktop_app`.
 
 ## Setup
 
@@ -12,25 +15,29 @@ py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -U pip
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 .\.venv\Scripts\python.exe -m pytest tests -q
-cd ..
-.\desktop_app\.venv\Scripts\python.exe -m desktop_app
 ```
 
 ## Run
 
-From the parent project folder:
+From inside `desktop_app`:
 
 ```powershell
-cd C:\Users\surje\Documents\invoice_automation
-.\desktop_app\.venv\Scripts\python.exe -m desktop_app
+cd C:\Users\surje\Documents\invoice_automation\desktop_app
+.\.venv\Scripts\python.exe main.py
 ```
 
-If `desktop_app\.venv` is already activated and you are inside the
-`desktop_app` folder:
+If `desktop_app\.venv` is already activated:
 
 ```powershell
 cd C:\Users\surje\Documents\invoice_automation\desktop_app
 python main.py
+```
+
+From the parent `invoice_automation` folder:
+
+```powershell
+cd C:\Users\surje\Documents\invoice_automation
+.\desktop_app\.venv\Scripts\python.exe -m desktop_app
 ```
 
 Do not run `python desktop_app` from inside the `desktop_app` folder. That asks
