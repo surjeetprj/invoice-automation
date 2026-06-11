@@ -13,7 +13,6 @@ APP_DIR = Path(__file__).resolve().parent
 load_dotenv(APP_DIR / ".env")
 
 APP_NAME = "InvoiceAI"
-LEGACY_RUNTIME_DIR = APP_DIR / "runtime"
 
 
 def app_data_dir() -> Path:
