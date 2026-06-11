@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..config import GOOGLE_API_KEY
+from ..config import GOOGLE_API_KEY, CURRENCY_DECIMAL_PLACES
 from ..domain.parsing import parse_decimal
 from ..domain.schemas import InvoiceData, SupplyType
 
@@ -46,7 +46,7 @@ def parse_invoice(raw_markdown: str, vendor_hint: str | None = None) -> dict[str
 
 
 def normalize_extracted_data(data: dict[str, Any]) -> dict[str, Any]:
-    """Normalize GSTINs, supply type, and numeric fields after AI parsing."""
+    """Normalize AI output into internally consistent invoice data."""
     for field in ("vendor_gstin", "customer_gstin", "shipping_gstin"):
         if isinstance(data.get(field), str):
             data[field] = data[field].strip().upper().replace(" ", "")
@@ -72,12 +72,21 @@ def normalize_extracted_data(data: dict[str, Any]) -> dict[str, Any]:
     ):
         data[field] = to_float(data.get(field))
 
+    normalize_tax_totals(data)
+
     for item in data.get("line_items") or []:
         if not isinstance(item, dict):
             continue
         for field in ("quantity", "rate", "discount", "taxable_value", "cess_amount", "total"):
             item[field] = to_float(item.get(field))
     return data
+
+
+def normalize_tax_totals(data: dict[str, Any]) -> None:
+    """Fill aggregate tax total when component tax totals are present."""
+    component_tax_total = data["total_cgst"] + data["total_sgst"] + data["total_igst"] + data["total_cess"]
+    if data["total_tax_amount"] == 0.0 and component_tax_total > 0.0:
+        data["total_tax_amount"] = round(component_tax_total, CURRENCY_DECIMAL_PLACES)
 
 
 def to_float(value: Any) -> float:

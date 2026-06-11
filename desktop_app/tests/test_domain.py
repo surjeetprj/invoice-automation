@@ -5,8 +5,8 @@ from __future__ import annotations
 import unittest
 
 from desktop_app.domain.parsing import parse_date, parse_decimal
-from desktop_app.domain.schemas import InvoiceData, LineItem, SupplyType
-from desktop_app.services.ai_parser import to_float
+from desktop_app.domain.schemas import InvoiceData, LineItem, SupplyType, TaxDetail
+from desktop_app.services.ai_parser import normalize_extracted_data, to_float
 from desktop_app.ui.detail_page import cast_line_field
 from desktop_app.domain.validation import validate_gstin, validate_invoice, validate_supply_type
 
@@ -28,6 +28,48 @@ class DomainHelperTests(unittest.TestCase):
         self.assertEqual(to_float("Rs. 1,200"), 1200.0)
         self.assertEqual(to_float("INR 5,310.50"), 5310.50)
         self.assertEqual(to_float(None), 0.0)
+
+    def test_ai_normalization_derives_missing_total_tax_amount(self) -> None:
+        """Component tax totals should fill total_tax_amount when AI omits it."""
+        data = normalize_extracted_data({
+            "total_taxable_amount": 21613.0,
+            "total_igst": 3890.34,
+            "total_cgst": 0.0,
+            "total_sgst": 0.0,
+            "total_cess": 0.0,
+            "total_tax_amount": 0.0,
+            "round_off": 0.0,
+            "total_amount": 25503.34,
+            "line_items": [],
+        })
+        self.assertEqual(data["total_tax_amount"], 3890.34)
+        invoice = InvoiceData(vendor_name="SKE", invoice_number="SKEC2026042908", date="29-05-2026", **data)
+        result = validate_invoice(invoice)
+        self.assertFalse(any("Grand total mismatch" in error for error in result.errors))
+
+    def test_validation_uses_component_tax_total_when_total_tax_amount_missing(self) -> None:
+        """Validation should not fail grand total when only IGST aggregate is present."""
+        invoice = InvoiceData(
+            vendor_name="Relyon Softech Limited",
+            invoice_number="RSL2026DI000215",
+            date="08-05-2026",
+            total_taxable_amount=2467.0,
+            total_igst=444.06,
+            total_tax_amount=0.0,
+            round_off=-0.06,
+            total_amount=2911.0,
+            line_items=[
+                LineItem(
+                    description="Saral IncomeTax",
+                    quantity=1.0,
+                    rate=2467.0,
+                    taxable_value=2467.0,
+                    taxes=[TaxDetail(tax_type="IGST", tax_rate=18.0, taxable_amount=2467.0, tax_amount=444.06)],
+                )
+            ],
+        )
+        result = validate_invoice(invoice)
+        self.assertFalse(any("Grand total mismatch" in error for error in result.errors))
 
     def test_line_item_casting_rejects_invalid_numeric_text(self) -> None:
         """Invalid numeric table values should raise instead of becoming zero."""

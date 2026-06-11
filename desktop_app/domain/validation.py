@@ -64,7 +64,8 @@ def validate_invoice(data: InvoiceData) -> ValidationResult:
 
     if data.line_items and data.total_taxable_amount > 0 and abs(computed_taxable - data.total_taxable_amount) > MATH_TOLERANCE:
         warnings.append("Taxable amount mismatch between line items and invoice total")
-    if data.total_tax_amount > 0 and abs(computed_tax - data.total_tax_amount) > MATH_TOLERANCE:
+    effective_tax_total = effective_total_tax_amount(data, computed_tax)
+    if effective_tax_total > 0 and computed_tax > 0 and abs(computed_tax - effective_tax_total) > MATH_TOLERANCE:
         warnings.append("Tax amount mismatch between line taxes and invoice total")
     if data.total_cgst > 0 and abs(computed_cgst - data.total_cgst) > MATH_TOLERANCE:
         warnings.append("CGST total mismatch")
@@ -73,7 +74,7 @@ def validate_invoice(data: InvoiceData) -> ValidationResult:
     if data.total_igst > 0 and abs(computed_igst - data.total_igst) > MATH_TOLERANCE:
         warnings.append("IGST total mismatch")
     if data.total_amount > 0:
-        expected_total = data.total_taxable_amount + data.total_tax_amount + data.round_off
+        expected_total = data.total_taxable_amount + effective_tax_total + data.round_off
         if abs(data.total_amount - expected_total) > MATH_TOLERANCE:
             errors.append("Grand total mismatch: taxable + tax + round off does not equal total amount")
     if abs(data.round_off) > 1.0:
@@ -94,6 +95,16 @@ def validate_invoice(data: InvoiceData) -> ValidationResult:
         field_confidences=field_confidences,
         issues=issues,
     )
+
+
+def effective_total_tax_amount(data: InvoiceData, computed_tax: float = 0.0) -> float:
+    """Return the best available aggregate tax amount for invoice total checks."""
+    if data.total_tax_amount > 0:
+        return data.total_tax_amount
+    component_total = data.total_cgst + data.total_sgst + data.total_igst + data.total_cess
+    if component_total > 0:
+        return component_total
+    return computed_tax
 
 
 def calculate_confidence_score(data: InvoiceData, validation: ValidationResult) -> float:
