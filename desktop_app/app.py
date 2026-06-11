@@ -8,8 +8,13 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
-from .config import LOG_DIR
-from .ui.main_window import MainWindow
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from desktop_app.config import LOG_DIR
+    from desktop_app.ui.main_window import MainWindow
+else:
+    from .config import LOG_DIR
+    from .ui.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
 

@@ -174,9 +174,12 @@ class LineItemsTable(QWidget):
         """Update one table cell without recursively triggering recalculation."""
         self.loading = True
         col = [column[0] for column in LINE_COLUMNS].index(name)
-        item = self.table.item(row, col) or QTableWidgetItem()
+        item = self.table.item(row, col)
+        if item is None:
+            item = QTableWidgetItem()
+            self.table.setItem(row, col, item)
         item.setText(value)
-        self.table.setItem(row, col, item)
+        self.validate_item(item)
         self.loading = False
 
     def is_valid(self) -> bool:
