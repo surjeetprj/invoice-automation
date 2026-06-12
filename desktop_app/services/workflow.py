@@ -182,7 +182,7 @@ class DesktopWorkflow:
                         current[field] = value
                         changed.append(field)
                 data = InvoiceData(**current)
-                validation = validate_invoice(data)
+                validation = validate_invoice(data, invoice.raw_markdown)
                 invoice.extracted_data = json.dumps(data.model_dump(mode="json"))
                 invoice.validation_result = json.dumps(validation.model_dump(mode="json"))
                 invoice.invoice_number_extracted = data.invoice_number
@@ -271,7 +271,7 @@ class DesktopWorkflow:
             parsed = parse_invoice(raw_markdown, vendor_hint=invoice.filename)
             logger.info("AI parsing finished for invoice #%s", invoice.id)
             data = InvoiceData(**parsed)
-            validation = validate_invoice(data)
+            validation = validate_invoice(data, raw_markdown)
         except Exception as exc:
             logger.exception("AI parsing failed for invoice #%s", invoice.id)
             data = InvoiceData(vendor_name=invoice.filename)

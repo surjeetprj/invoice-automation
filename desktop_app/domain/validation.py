@@ -11,10 +11,10 @@ from .schemas import FieldConfidence, InvoiceData, ValidationIssue, ValidationRe
 
 GSTIN_PATTERN = re.compile(r"^\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z][A-Z][A-Z0-9]$", re.IGNORECASE)
 HSN_PATTERN = re.compile(r"^\d{4}(\d{2})?(\d{2})?$")
-SAC_PATTERN = re.compile(r"^99\d{4}$")
+SAC_PATTERN = re.compile(r"^99\d{2}(\d{2})?$")
 
 
-def validate_invoice(data: InvoiceData) -> ValidationResult:
+def validate_invoice(data: InvoiceData, raw_text: str | None = None) -> ValidationResult:
     """Validate extracted invoice data against GST and arithmetic rules."""
     errors: list[str] = []
     warnings: list[str] = []
@@ -77,11 +77,12 @@ def validate_invoice(data: InvoiceData) -> ValidationResult:
         expected_total = data.total_taxable_amount + effective_tax_total + data.round_off
         if abs(data.total_amount - expected_total) > MATH_TOLERANCE:
             errors.append("Grand total mismatch: taxable + tax + round off does not equal total amount")
+    validate_tax_component_consistency(data, computed_cgst, computed_sgst, computed_igst, errors)
     if abs(data.round_off) > 1.0:
         warnings.append("Round-off exceeds +/-1.00; verify manually")
     if data.total_amount > EWAY_BILL_THRESHOLD and not data.e_way_bill_no:
         warnings.append("Invoice value exceeds E-Way Bill threshold but no E-Way Bill number was found")
-    if not data.reverse_charge:
+    if not data.reverse_charge and mentions_reverse_charge(raw_text):
         warnings.append("Reverse Charge field not found")
     if not data.place_of_supply:
         warnings.append("Place of Supply not found")
@@ -149,7 +150,7 @@ def validate_hsn_sac(code: str | None, index: int, warnings: list[str]) -> None:
         return
     cleaned = code.strip()
     if cleaned.startswith("99") and not SAC_PATTERN.match(cleaned):
-        warnings.append(f"Line {index}: SAC code should be 6 digits starting with 99")
+        warnings.append(f"Line {index}: SAC code should be 4 or 6 digits starting with 99")
     elif not cleaned.startswith("99") and not HSN_PATTERN.match(cleaned):
         warnings.append(f"Line {index}: HSN code should be 4, 6, or 8 digits")
 
@@ -157,16 +158,37 @@ def validate_hsn_sac(code: str | None, index: int, warnings: list[str]) -> None:
 def validate_supply_type(data: InvoiceData, errors: list[str], warnings: list[str]) -> None:
     """Validate GST supply type against tax totals and GSTIN state codes."""
     supply_type = data.supply_type.value if data.supply_type else "UNKNOWN"
-    if supply_type == "INTRA_STATE" and data.total_igst > 0 and data.total_cgst == 0 and data.total_sgst == 0:
-        errors.append("Supply type is INTRA_STATE but only IGST is present")
-    if supply_type == "INTER_STATE" and data.total_cgst > 0 and data.total_igst == 0:
-        errors.append("Supply type is INTER_STATE but CGST/SGST is present")
     if data.vendor_gstin and data.customer_gstin and len(data.vendor_gstin) >= 2 and len(data.customer_gstin) >= 2:
         same_state = data.vendor_gstin[:2] == data.customer_gstin[:2]
         if same_state and supply_type == "INTER_STATE":
             warnings.append("Vendor and customer GSTIN state codes match but supply type is INTER_STATE")
         if not same_state and supply_type == "INTRA_STATE":
             warnings.append("Vendor and customer GSTIN state codes differ but supply type is INTRA_STATE")
+
+
+def validate_tax_component_consistency(
+    data: InvoiceData,
+    computed_cgst: float,
+    computed_sgst: float,
+    computed_igst: float,
+    errors: list[str],
+) -> None:
+    """Validate line-level and aggregate tax components against supply type."""
+    supply_type = data.supply_type.value if data.supply_type else "UNKNOWN"
+    cgst_total = data.total_cgst + computed_cgst
+    sgst_total = data.total_sgst + computed_sgst
+    igst_total = data.total_igst + computed_igst
+    if supply_type == "INTER_STATE" and (cgst_total > 0 or sgst_total > 0) and igst_total == 0:
+        errors.append("Supply type is INTER_STATE but CGST/SGST is present")
+    if supply_type == "INTRA_STATE" and igst_total > 0 and cgst_total == 0 and sgst_total == 0:
+        errors.append("Supply type is INTRA_STATE but only IGST is present")
+
+
+def mentions_reverse_charge(raw_text: str | None) -> bool:
+    """Return true when the invoice text appears to contain a reverse charge label."""
+    if not raw_text:
+        return False
+    return bool(re.search(r"\breverse\s+charge\b|\brcm\b", raw_text, re.IGNORECASE))
 
 
 def infer_issue_field(message: str) -> str:
