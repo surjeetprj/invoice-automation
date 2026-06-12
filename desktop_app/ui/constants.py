@@ -14,7 +14,13 @@ NUMERIC_FIELDS = {
     "total_taxable_amount", "total_cgst", "total_sgst", "total_igst",
     "total_cess", "total_tax_amount", "round_off", "total_amount",
 }
-LINE_FLOAT_FIELDS = {"quantity", "rate", "discount", "taxable_value", "cess_amount", "total"}
+TAX_COMPONENTS = ("cgst", "sgst", "igst")
+TAX_RATE_FIELDS = {f"{component}_rate" for component in TAX_COMPONENTS}
+TAX_AMOUNT_FIELDS = {f"{component}_amount" for component in TAX_COMPONENTS}
+LINE_FLOAT_FIELDS = {
+    "quantity", "rate", "discount", "taxable_value", "cess_amount", "total",
+    *TAX_RATE_FIELDS, *TAX_AMOUNT_FIELDS,
+}
 
 FIELD_GROUPS = {
     "General": ["invoice_number", "date", "due_date", "place_of_supply", "amount_in_words"],
@@ -28,6 +34,10 @@ FIELD_GROUPS = {
 LINE_COLUMNS = [
     ("sr_no", "Sr No"), ("description", "Description"), ("hsn_sac", "HSN/SAC"),
     ("unit", "Unit"), ("quantity", "Quantity"), ("rate", "Rate"),
-    ("taxable_value", "Taxable"), ("cess_amount", "Cess"), ("discount", "Discount"),
+    ("discount", "Discount"), ("taxable_value", "Taxable"),
+    ("cgst_rate", "CGST %"), ("cgst_amount", "CGST Amount"),
+    ("sgst_rate", "SGST %"), ("sgst_amount", "SGST Amount"),
+    ("igst_rate", "IGST %"), ("igst_amount", "IGST Amount"),
+    ("cess_amount", "Cess"),
     ("total", "Total"),
 ]

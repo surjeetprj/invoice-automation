@@ -8,7 +8,7 @@ from desktop_app.domain.parsing import parse_date, parse_decimal
 from desktop_app.domain.schemas import InvoiceData, LineItem, SupplyType, TaxDetail
 from desktop_app.services.ai_parser import enrich_from_raw_text, normalize_extracted_data, to_float
 from desktop_app.services.extraction import extract_page_content, table_to_markdown
-from desktop_app.ui.detail_page import cast_line_field
+from desktop_app.ui.detail_page import build_line_item_taxes, cast_line_field, flatten_line_item_taxes
 from desktop_app.domain.validation import validate_gstin, validate_invoice, validate_supply_type
 
 
@@ -235,6 +235,31 @@ Description Qty Rate Amount
         self.assertEqual(cast_line_field("quantity", ""), 0.0)
         self.assertIsNone(cast_line_field("sr_no", ""))
         self.assertEqual(cast_line_field("rate", "123.45"), 123.45)
+
+    def test_line_tax_helpers_flatten_and_rebuild_gst_components(self) -> None:
+        """Line item tax rows should survive UI flatten/rebuild helpers."""
+        item = {
+            "description": "Service",
+            "quantity": 1.0,
+            "rate": 1000.0,
+            "discount": 0.0,
+            "taxable_value": 1000.0,
+            "cess_amount": 0.0,
+            "taxes": [
+                {"tax_type": "CGST", "tax_rate": 9.0, "taxable_amount": 1000.0, "tax_amount": 90.0},
+                {"tax_type": "SGST", "tax_rate": 9.0, "taxable_amount": 1000.0, "tax_amount": 90.0},
+            ],
+        }
+        flattened = flatten_line_item_taxes(item)
+        self.assertEqual(flattened["cgst_rate"], 9.0)
+        self.assertEqual(flattened["sgst_amount"], 90.0)
+        self.assertEqual(flattened["total"], 1180.0)
+
+        rebuilt = build_line_item_taxes(flattened)
+        self.assertEqual(rebuilt["total"], 1180.0)
+        self.assertEqual(len(rebuilt["taxes"]), 2)
+        self.assertEqual(rebuilt["taxes"][0]["tax_type"], "CGST")
+        self.assertEqual(rebuilt["taxes"][0]["tax_rate"], 9.0)
 
     def test_parse_date_accepts_common_invoice_formats(self) -> None:
         """Common invoice date formats should be normalized by one helper."""

@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from .constants import FIELD_GROUPS, LINE_COLUMNS, LINE_FLOAT_FIELDS, NUMERIC_FIELDS
+from .constants import FIELD_GROUPS, LINE_COLUMNS, LINE_FLOAT_FIELDS, NUMERIC_FIELDS, TAX_AMOUNT_FIELDS, TAX_COMPONENTS, TAX_RATE_FIELDS
 from .widgets.audit_pane import AuditPane
 from .widgets.pdf_preview import PdfPreview
 from .widgets.validation_pane import ValidationPane
@@ -128,8 +128,9 @@ class LineItemsTable(QWidget):
         self.loading = True
         self.table.setRowCount(len(items))
         for row, item in enumerate(items):
+            flat_item = flatten_line_item_taxes(item)
             for col, (name, _label) in enumerate(LINE_COLUMNS):
-                value = item.get(name)
+                value = flat_item.get(name)
                 cell = QTableWidgetItem("" if value is None else str(value))
                 self.table.setItem(row, col, cell)
         self.loading = False
@@ -154,7 +155,8 @@ class LineItemsTable(QWidget):
         if self.loading:
             return
         self.validate_item(item)
-        if LINE_COLUMNS[item.column()][0] in {"quantity", "rate", "discount", "cess_amount"}:
+        name = LINE_COLUMNS[item.column()][0]
+        if name in {"quantity", "rate", "discount", "cess_amount", *TAX_RATE_FIELDS, *TAX_AMOUNT_FIELDS}:
             self.recalculate_row(item.row())
         self.changed.emit()
 
@@ -165,9 +167,14 @@ class LineItemsTable(QWidget):
         except ValueError:
             self.validate_row(row)
             return
-        taxable = max((values.get("quantity") or 0.0) * (values.get("rate") or 0.0) - (values.get("discount") or 0.0), 0.0)
-        total = taxable + (values.get("cess_amount") or 0.0)
+        taxable = calculate_taxable_value(values)
         self.set_cell(row, "taxable_value", f"{taxable:.2f}")
+        for component in TAX_COMPONENTS:
+            rate = values.get(f"{component}_rate") or 0.0
+            amount = round(taxable * rate / 100, 2)
+            self.set_cell(row, f"{component}_amount", f"{amount:.2f}")
+            values[f"{component}_amount"] = amount
+        total = calculate_line_total({**values, "taxable_value": taxable})
         self.set_cell(row, "total", f"{total:.2f}")
 
     def set_cell(self, row: int, name: str, value: str) -> None:
@@ -219,7 +226,7 @@ class LineItemsTable(QWidget):
 
     def values(self) -> list[dict[str, Any]]:
         """Return all line items as typed dictionaries."""
-        return [self.row_values(row) for row in range(self.table.rowCount())]
+        return [build_line_item_taxes(self.row_values(row)) for row in range(self.table.rowCount())]
 
 
 class DetailPage(QWidget):
@@ -408,6 +415,57 @@ def cast_field(name: str, value: str) -> Any:
     if name in NUMERIC_FIELDS:
         return float(text)
     return text
+
+
+def flatten_line_item_taxes(item: dict[str, Any]) -> dict[str, Any]:
+    """Flatten nested tax rows into editable GST component columns."""
+    flattened = dict(item)
+    for component in TAX_COMPONENTS:
+        flattened.setdefault(f"{component}_rate", 0.0)
+        flattened.setdefault(f"{component}_amount", 0.0)
+    for tax in item.get("taxes") or []:
+        tax_type = str(tax.get("tax_type") or "").strip().lower()
+        if tax_type in TAX_COMPONENTS:
+            flattened[f"{tax_type}_rate"] = tax.get("tax_rate") or 0.0
+            flattened[f"{tax_type}_amount"] = (flattened.get(f"{tax_type}_amount") or 0.0) + (tax.get("tax_amount") or 0.0)
+    if flattened.get("taxable_value") is not None:
+        flattened["total"] = calculate_line_total(flattened)
+    return flattened
+
+
+def build_line_item_taxes(values: dict[str, Any]) -> dict[str, Any]:
+    """Rebuild nested GST tax rows from editable component columns."""
+    item = {
+        key: value
+        for key, value in values.items()
+        if key not in TAX_RATE_FIELDS and key not in TAX_AMOUNT_FIELDS
+    }
+    taxable_value = values.get("taxable_value") or 0.0
+    taxes = []
+    for component in TAX_COMPONENTS:
+        rate = values.get(f"{component}_rate") or 0.0
+        amount = values.get(f"{component}_amount") or 0.0
+        if rate > 0 or amount > 0:
+            taxes.append({
+                "tax_type": component.upper(),
+                "tax_rate": rate,
+                "taxable_amount": taxable_value,
+                "tax_amount": amount,
+            })
+    item["taxes"] = taxes
+    item["total"] = calculate_line_total(values)
+    return item
+
+
+def calculate_taxable_value(values: dict[str, Any]) -> float:
+    """Calculate taxable value from quantity, rate, and discount."""
+    return max((values.get("quantity") or 0.0) * (values.get("rate") or 0.0) - (values.get("discount") or 0.0), 0.0)
+
+
+def calculate_line_total(values: dict[str, Any]) -> float:
+    """Calculate gross line total including GST components and cess."""
+    tax_total = sum(values.get(f"{component}_amount") or 0.0 for component in TAX_COMPONENTS)
+    return round((values.get("taxable_value") or 0.0) + tax_total + (values.get("cess_amount") or 0.0), 2)
 
 
 def cast_line_field(name: str, value: str) -> Any:
