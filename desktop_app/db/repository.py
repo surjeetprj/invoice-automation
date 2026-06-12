@@ -36,12 +36,14 @@ def persist_extraction(
     data: InvoiceData,
     validation: ValidationResult,
     raw_markdown: str | None,
+    document_kind: str | None = None,
+    mime_type: str | None = None,
 ) -> None:
     """Replace normalized extraction and validation rows for an invoice."""
     invoice.extraction = None
     invoice.validation_issues.clear()
     db.flush()
-    invoice.extraction = build_extraction(data, raw_markdown)
+    invoice.extraction = build_extraction(data, raw_markdown, document_kind, mime_type)
     invoice.validation_issues = [
         InvoiceValidationIssue(severity=issue.severity, message=issue.message, field=issue.field)
         for issue in validation.issues
@@ -50,10 +52,15 @@ def persist_extraction(
     db.flush()
 
 
-def build_extraction(data: InvoiceData, raw_markdown: str | None) -> InvoiceExtraction:
+def build_extraction(
+    data: InvoiceData,
+    raw_markdown: str | None,
+    document_kind: str | None = None,
+    mime_type: str | None = None,
+) -> InvoiceExtraction:
     """Create ORM extraction rows from an InvoiceData object."""
     payload = data.model_dump(mode="json")
-    extraction = InvoiceExtraction(raw_markdown=raw_markdown)
+    extraction = InvoiceExtraction(raw_markdown=raw_markdown, document_kind=document_kind, mime_type=mime_type)
     for field in SCALAR_FIELDS:
         if field == "supply_type":
             value = data.supply_type.value if data.supply_type else None

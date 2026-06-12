@@ -3,12 +3,17 @@ from __future__ import annotations
 """Regression tests for desktop parsing and validation helpers."""
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import Mock, patch
 
 from desktop_app.domain.parsing import parse_date, parse_decimal
 from desktop_app.domain.schemas import InvoiceData, LineItem, SupplyType, TaxDetail
-from desktop_app.services.ai_parser import enrich_from_raw_text, normalize_extracted_data, to_float
+from desktop_app.services.ai_parser import enrich_from_raw_text, normalize_extracted_data, parse_invoice_source, to_float
+from desktop_app.services.document_source import DocumentKind, InvoiceSource, classify_document, mime_type_for_path, validate_upload_file
 from desktop_app.services.extraction import extract_page_content, table_to_markdown
 from desktop_app.ui.detail_page import build_line_item_taxes, cast_line_field, flatten_line_item_taxes
+from desktop_app.ui.widgets.pdf_preview import render_document_to_images
 from desktop_app.domain.validation import validate_gstin, validate_invoice, validate_supply_type
 
 
@@ -73,6 +78,119 @@ class DomainHelperTests(unittest.TestCase):
         self.assertEqual(page_text, "Invoice text")
         self.assertEqual(len(tables), 1)
         self.assertIn("| Service | 100 |", tables[0])
+
+    def test_document_classifier_routes_images_without_pdf_extraction(self) -> None:
+        """Supported image uploads should be routed as visual invoices."""
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "invoice.jpg"
+            path.write_bytes(b"fake image bytes")
+            source = classify_document(path)
+
+        self.assertEqual(source.document_kind, DocumentKind.IMAGE)
+        self.assertEqual(source.mime_type, "image/jpeg")
+
+    def test_document_classifier_uses_pdf_classification(self) -> None:
+        """PDF uploads should keep the digital/scanned classifier result."""
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "invoice.pdf"
+            path.write_bytes(b"%PDF-1.4")
+            with patch("desktop_app.services.document_source.classify_pdf", return_value=DocumentKind.SCANNED_PDF):
+                source = classify_document(path)
+
+        self.assertEqual(source.document_kind, DocumentKind.SCANNED_PDF)
+        self.assertEqual(source.mime_type, "application/pdf")
+
+    def test_upload_validation_rejects_unsupported_images(self) -> None:
+        """Unsupported image types should fail before parsing."""
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "invoice.bmp"
+            path.write_bytes(b"fake image bytes")
+            with self.assertRaises(ValueError):
+                validate_upload_file(path)
+
+    def test_mime_type_detection_handles_supported_uploads(self) -> None:
+        """Supported upload extensions should map to Gemini MIME types."""
+        self.assertEqual(mime_type_for_path(Path("invoice.pdf")), "application/pdf")
+        self.assertEqual(mime_type_for_path(Path("invoice.png")), "image/png")
+        self.assertEqual(mime_type_for_path(Path("invoice.webp")), "image/webp")
+
+    def test_parser_source_routes_digital_pdf_to_text_parser(self) -> None:
+        """Digital PDFs should use local text extraction plus text Gemini parser."""
+        source = InvoiceSource(path=Path("invoice.pdf"), document_kind=DocumentKind.DIGITAL_PDF, mime_type="application/pdf")
+        with (
+            patch("desktop_app.services.ai_parser.extract_invoice_text", return_value="raw text") as extract,
+            patch("desktop_app.services.ai_parser.invoke_invoice_parser", return_value={"invoice_number": "INV-1"}) as parse,
+        ):
+            result = parse_invoice_source(source, vendor_hint="invoice.pdf")
+
+        extract.assert_called_once_with(source.path)
+        parse.assert_called_once()
+        self.assertEqual(result.source_text, "raw text")
+        self.assertEqual(result.document_kind, "DIGITAL_PDF")
+        self.assertEqual(result.data["invoice_number"], "INV-1")
+
+    def test_parser_source_routes_images_to_visual_parser(self) -> None:
+        """Images should skip local text extraction and call the visual parser."""
+        source = InvoiceSource(path=Path("invoice.png"), document_kind=DocumentKind.IMAGE, mime_type="image/png")
+        with (
+            patch("desktop_app.services.ai_parser.extract_invoice_text") as extract,
+            patch("desktop_app.services.ai_parser.invoke_invoice_file_parser", return_value={"invoice_number": "IMG-1"}) as parse,
+        ):
+            result = parse_invoice_source(source, vendor_hint="invoice.png")
+
+        extract.assert_not_called()
+        parse.assert_called_once_with(source.path, "image/png", "invoice.png")
+        self.assertIsNone(result.source_text)
+        self.assertEqual(result.document_kind, "IMAGE")
+        self.assertEqual(result.data["invoice_number"], "IMG-1")
+
+    def test_parser_source_routes_scanned_pdf_to_visual_parser(self) -> None:
+        """Scanned PDFs should skip local text extraction and call the visual parser."""
+        source = InvoiceSource(path=Path("invoice.pdf"), document_kind=DocumentKind.SCANNED_PDF, mime_type="application/pdf")
+        with (
+            patch("desktop_app.services.ai_parser.extract_invoice_text") as extract,
+            patch("desktop_app.services.ai_parser.invoke_invoice_file_parser", return_value={"invoice_number": "SCAN-1"}) as parse,
+        ):
+            result = parse_invoice_source(source, vendor_hint="invoice.pdf")
+
+        extract.assert_not_called()
+        parse.assert_called_once_with(source.path, "application/pdf", "invoice.pdf")
+        self.assertIsNone(result.source_text)
+        self.assertEqual(result.document_kind, "SCANNED_PDF")
+        self.assertEqual(result.data["invoice_number"], "SCAN-1")
+
+    def test_visual_ai_client_returns_structured_invoice_data(self) -> None:
+        """The visual Gemini client should return a schema-shaped dictionary."""
+        from desktop_app.services.ai_client import invoke_invoice_file_parser
+
+        class FakeResponse:
+            parsed = InvoiceData(invoice_number="VIS-1")
+
+        fake_client = Mock()
+        fake_client.models.generate_content.return_value = FakeResponse()
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "invoice.png"
+            path.write_bytes(b"fake image bytes")
+            with (
+                patch("desktop_app.services.ai_client.GOOGLE_API_KEY", "test-key"),
+                patch("google.genai.Client", return_value=fake_client),
+            ):
+                result = invoke_invoice_file_parser(path, "image/png", "invoice.png")
+
+        self.assertEqual(result["invoice_number"], "VIS-1")
+        fake_client.models.generate_content.assert_called_once()
+
+    def test_document_preview_accepts_image_path(self) -> None:
+        """Image invoices should render into preview image paths."""
+        from PIL import Image
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "invoice.png"
+            Image.new("RGB", (80, 60), "white").save(path)
+            pages = render_document_to_images(path)
+
+        self.assertEqual(len(pages), 1)
+        self.assertTrue(pages[0].exists())
 
     def test_raw_text_enrichment_extracts_ship_to_block(self) -> None:
         """Visible right-column Ship To data should be recovered if AI misses it."""

@@ -67,7 +67,7 @@ class DatabasePersistenceTests(unittest.TestCase):
             data = self.sample_invoice_data()
             validation = ValidationResult(is_valid=True)
 
-            persist_extraction(db, invoice, data, validation, "raw text")
+            persist_extraction(db, invoice, data, validation, "raw text", document_kind="DIGITAL_PDF", mime_type="application/pdf")
             db.commit()
             db.refresh(invoice)
 
@@ -80,6 +80,8 @@ class DatabasePersistenceTests(unittest.TestCase):
             self.assertEqual(loaded.tax_breakup[0].tax_amount, 180)
             self.assertEqual(invoice.invoice_number_extracted, "INV-1")
             self.assertEqual(invoice.total_amount_extracted, 1180)
+            self.assertEqual(invoice.extraction.document_kind, "DIGITAL_PDF")
+            self.assertEqual(invoice.extraction.mime_type, "application/pdf")
 
     def test_validation_issues_round_trip(self) -> None:
         """Validation errors and warnings should rebuild from issue rows."""

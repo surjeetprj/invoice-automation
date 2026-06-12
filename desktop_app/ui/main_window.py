@@ -27,7 +27,7 @@ from .dashboard_page import DashboardPage
 from .detail_page import DetailPage
 from .invoices_page import InvoicesPage
 from .upload_page import UploadPage
-from .widgets.pdf_preview import render_pdf_to_images
+from .widgets.pdf_preview import render_document_to_images
 from .widgets.worker import Worker, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -43,8 +43,8 @@ class MainWindow(QMainWindow):
         self.workflow.initialize()
         self.thread_pool = QThreadPool.globalInstance()
         self.active_workers: set[Worker] = set()
-        self.current_pdf_invoice_id: int | None = None
-        self.pdf_request_token = 0
+        self.current_document_invoice_id: int | None = None
+        self.document_request_token = 0
         self.nav_buttons: dict[str, QPushButton] = {}
 
         self.setWindowTitle("Invoice AI Desktop")
@@ -129,7 +129,7 @@ class MainWindow(QMainWindow):
         self.detail.reprocess_requested.connect(self.reprocess_invoice)
         self.detail.export_requested.connect(self.export_invoice)
         self.detail.pdf_requested.connect(self.load_pdf)
-        self.detail.pdf_preview.zoom_requested.connect(lambda _zoom: self.reload_current_pdf())
+        self.detail.pdf_preview.zoom_requested.connect(lambda _zoom: self.reload_current_document())
 
     def show_page(self, key: str, page: QWidget) -> None:
         """Switch to a page and update sidebar active state."""
@@ -206,7 +206,7 @@ class MainWindow(QMainWindow):
 
     def upload_invoice(self, path: str) -> None:
         """Start invoice validation, extraction, parsing, and persistence."""
-        self.upload.set_busy(True, "Validating PDF and processing invoice...")
+        self.upload.set_busy(True, "Validating document and processing invoice...")
 
         def done(invoice: dict[str, Any]) -> None:
             self.upload.set_busy(False, "Upload complete.")
@@ -222,7 +222,7 @@ class MainWindow(QMainWindow):
     def open_invoice(self, invoice_id: int) -> None:
         """Open an invoice detail page and trigger async PDF rendering."""
         self.stack.setCurrentWidget(self.detail)
-        self.current_pdf_invoice_id = invoice_id
+        self.current_document_invoice_id = invoice_id
 
         def loaded(invoice: dict[str, Any]) -> None:
             self.detail.load_invoice(invoice)
@@ -230,15 +230,15 @@ class MainWindow(QMainWindow):
         self.run_task(self.workflow.get_invoice, loaded, invoice_id)
 
     def load_pdf(self, invoice_id: int) -> None:
-        """Load and render the invoice PDF preview without blocking the UI."""
-        self.current_pdf_invoice_id = invoice_id
-        self.pdf_request_token += 1
-        token = self.pdf_request_token
+        """Load and render the invoice document preview without blocking the UI."""
+        self.current_document_invoice_id = invoice_id
+        self.document_request_token += 1
+        token = self.document_request_token
 
-        def path_loaded(pdf_path: Path) -> None:
+        def path_loaded(document_path: Path) -> None:
             if not self.is_current_pdf_request(invoice_id, token):
                 return
-            self.detail.set_pdf_loading(pdf_path)
+            self.detail.set_pdf_loading(document_path)
             scale = self.detail.pdf_preview.zoom
 
             def rendered(image_paths: list[Path]) -> None:
@@ -246,26 +246,26 @@ class MainWindow(QMainWindow):
                     self.detail.set_pdf_pages(image_paths)
 
             self.run_task(
-                lambda: render_pdf_to_images(pdf_path, scale=scale),
+                lambda: render_document_to_images(document_path, scale=scale),
                 rendered,
                 on_error=lambda err: self.detail.set_pdf_error(err) if self.is_current_pdf_request(invoice_id, token) else None,
             )
 
         self.run_task(
-            self.workflow.get_pdf_path,
+            self.workflow.get_document_path,
             path_loaded,
             invoice_id,
             on_error=lambda err: self.detail.set_pdf_error(err) if self.is_current_pdf_request(invoice_id, token) else None,
         )
 
-    def reload_current_pdf(self) -> None:
-        """Re-render the currently selected invoice PDF after zoom changes."""
-        if self.current_pdf_invoice_id is not None:
-            self.load_pdf(self.current_pdf_invoice_id)
+    def reload_current_document(self) -> None:
+        """Re-render the currently selected invoice document after zoom changes."""
+        if self.current_document_invoice_id is not None:
+            self.load_pdf(self.current_document_invoice_id)
 
     def is_current_pdf_request(self, invoice_id: int, token: int) -> bool:
-        """Return True when an async PDF result still belongs to the visible invoice."""
-        return self.current_pdf_invoice_id == invoice_id and self.pdf_request_token == token
+        """Return True when an async preview result still belongs to the visible invoice."""
+        return self.current_document_invoice_id == invoice_id and self.document_request_token == token
 
     def load_audit(self, invoice_id: int) -> None:
         """Load audit logs for the current invoice."""

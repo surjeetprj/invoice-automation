@@ -12,7 +12,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from ..config import ALLOWED_EXTENSIONS, DUPLICATE_CHECK_ENABLED, InvoiceStatus, UPLOAD_DIR
+from ..config import DUPLICATE_CHECK_ENABLED, InvoiceStatus, UPLOAD_DIR
 from ..db.models import AuditLog, Invoice
 from ..db.repository import (
     invoice_data_from_invoice,
@@ -30,9 +30,10 @@ from ..domain.schemas import (
     ReviewDecision,
     ValidationResult,
 )
-from .ai_parser import parse_invoice
+from .ai_parser import parse_invoice_source
+from .document_source import DocumentKind, classify_document, validate_upload_file
 from .exporters import export_invoice_csv, export_invoice_json, export_invoice_tally, export_to_erpnext
-from .extraction import ScannedDocumentException, extract_invoice_text, validate_file
+from .extraction import ScannedDocumentException
 from ..domain.validation import calculate_confidence_score, validate_invoice
 
 logger = logging.getLogger(__name__)
@@ -99,10 +100,10 @@ class DesktopWorkflow:
             invoice = self.require_invoice(db, invoice_id)
             return self.invoice_to_record(invoice).model_dump(mode="json")
 
-    def get_pdf_path(self, invoice_id: int) -> Path:
-        """Return the local PDF path for an invoice."""
+    def get_document_path(self, invoice_id: int) -> Path:
+        """Return the local source document path for an invoice."""
         self.initialize()
-        logger.info("Resolving PDF path for invoice #%s", invoice_id)
+        logger.info("Resolving document path for invoice #%s", invoice_id)
         with session_scope() as db:
             invoice = self.require_invoice(db, invoice_id)
             path = Path(invoice.file_path)
@@ -110,14 +111,16 @@ class DesktopWorkflow:
                 raise FileNotFoundError(f"Invoice file not found: {path}")
             return path
 
+    def get_pdf_path(self, invoice_id: int) -> Path:
+        """Return the local source document path for older UI callers."""
+        return self.get_document_path(invoice_id)
+
     def upload_invoice(self, source_path: str | Path) -> dict[str, Any]:
         """Copy, process, persist, and return a newly uploaded invoice."""
         self.initialize()
         source = Path(source_path)
         logger.info("Upload requested: %s", source)
-        if source.suffix.lower() not in ALLOWED_EXTENSIONS:
-            raise ValueError("Only PDF invoices are supported.")
-        validate_file(source)
+        validate_upload_file(source)
         file_hash = sha256_file(source)
         target = self.unique_upload_path(source.name)
         shutil.copy2(source, target)
@@ -137,10 +140,9 @@ class DesktopWorkflow:
             try:
                 self.run_pipeline(db, invoice, target)
             except ScannedDocumentException as exc:
-                invoice.status = InvoiceStatus.REJECTED
+                invoice.status = InvoiceStatus.PENDING_REVIEW
                 db.commit()
-                self.log(db, invoice.id, f"Pipeline rejected: {exc}")
-                raise
+                self.log(db, invoice.id, f"Pipeline extraction route error: {exc}")
             except Exception as exc:
                 logger.exception("Pipeline error for invoice %s", invoice.id)
                 invoice.status = InvoiceStatus.PENDING_REVIEW
@@ -190,7 +192,9 @@ class DesktopWorkflow:
                 data = InvoiceData(**current)
                 raw_markdown = raw_markdown_from_invoice(invoice)
                 validation = validate_invoice(data, raw_markdown)
-                persist_extraction(db, invoice, data, validation, raw_markdown)
+                document_kind = invoice.extraction.document_kind if invoice.extraction else None
+                mime_type = invoice.extraction.mime_type if invoice.extraction else None
+                persist_extraction(db, invoice, data, validation, raw_markdown, document_kind=document_kind, mime_type=mime_type)
                 invoice.status = InvoiceStatus.APPROVED
                 invoice.reviewed_by = review.reviewer
                 invoice.reviewed_at = now
@@ -266,12 +270,19 @@ class DesktopWorkflow:
         db.commit()
         self.log(db, invoice.id, "Status set to In_Process")
 
-        raw_markdown = extract_invoice_text(file_path)
-        logger.info("PDF extraction finished for invoice #%s: %d chars", invoice.id, len(raw_markdown))
-        self.log(db, invoice.id, f"PDF extraction complete - {len(raw_markdown)} chars")
+        source = classify_document(file_path)
+        self.log(db, invoice.id, f"Document classified as {source.document_kind.value}", reason=source.mime_type)
 
         try:
-            parsed = parse_invoice(raw_markdown, vendor_hint=invoice.filename)
+            parsed_result = parse_invoice_source(source, vendor_hint=invoice.filename)
+            raw_markdown = parsed_result.source_text
+            if source.document_kind == DocumentKind.DIGITAL_PDF:
+                logger.info("PDF extraction finished for invoice #%s: %d chars", invoice.id, len(raw_markdown or ""))
+                self.log(db, invoice.id, f"PDF extraction complete - {len(raw_markdown or '')} chars")
+            else:
+                logger.info("Visual parsing route selected for invoice #%s: %s", invoice.id, source.document_kind.value)
+                self.log(db, invoice.id, f"Visual AI parsing route used - {source.document_kind.value}")
+            parsed = parsed_result.data
             logger.info("AI parsing finished for invoice #%s", invoice.id)
             data = InvoiceData(**parsed)
             validation = validate_invoice(data, raw_markdown)
@@ -285,10 +296,20 @@ class DesktopWorkflow:
                 issues=[{"severity": "error", "message": str(exc), "field": "AI Parser"}],
             )
             self.log(db, invoice.id, f"AI parsing failed: {exc}")
+            raw_markdown = None
+            parsed_result = None
         confidence = calculate_confidence_score(data, validation)
         data.confidence_score = confidence
 
-        persist_extraction(db, invoice, data, validation, raw_markdown)
+        persist_extraction(
+            db,
+            invoice,
+            data,
+            validation,
+            raw_markdown,
+            document_kind=source.document_kind.value,
+            mime_type=source.mime_type,
+        )
         invoice.status = InvoiceStatus.PENDING_REVIEW
         invoice.processing_time_ms = int((time.perf_counter() - start) * 1000)
         db.commit()

@@ -69,6 +69,8 @@ class InvoiceExtraction(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     invoice_id: Mapped[int] = mapped_column(Integer, ForeignKey("invoices.id"), nullable=False)
     raw_markdown: Mapped[str | None] = mapped_column(Text, nullable=True)
+    document_kind: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     invoice_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
     date: Mapped[str | None] = mapped_column(String(30), nullable=True)
     due_date: Mapped[str | None] = mapped_column(String(30), nullable=True)

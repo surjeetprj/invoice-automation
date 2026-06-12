@@ -280,7 +280,7 @@ class DetailPage(QWidget):
         pdf_panel = QFrame()
         pdf_panel.setObjectName("pdfPanel")
         pdf_layout = QVBoxLayout(pdf_panel)
-        pdf_header = QLabel("Invoice PDF")
+        pdf_header = QLabel("Invoice Document")
         pdf_header.setObjectName("sectionTitle")
         self.pdf_preview = PdfPreview()
         pdf_layout.addWidget(pdf_header)

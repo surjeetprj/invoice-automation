@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-"""PDF classification and text extraction helpers for desktop processing."""
+"""PDF text and table extraction helpers for desktop processing."""
 
 import logging
 from pathlib import Path
 
 import pdfplumber
-from pypdf.errors import PdfReadError
 
-from ..config import MAX_FILE_SIZE_MB
+from .document_source import DocumentKind, classify_pdf as classify_pdf_kind, validate_upload_file
 
 logger = logging.getLogger(__name__)
 
@@ -25,43 +24,18 @@ class ScannedDocumentException(Exception):
 
 
 def classify_pdf(file_path: Path) -> str:
-    """Classify a PDF as DIGITAL or SCANNED using image coverage and text."""
-    try:
-        with pdfplumber.open(file_path) as pdf:
-            if pdf.pages:
-                first_page = pdf.pages[0]
-                page_area = first_page.width * first_page.height
-                for image in first_page.images:
-                    image_area = (image.get("x1", 0) - image.get("x0", 0)) * (image.get("y1", 0) - image.get("y0", 0))
-                    if page_area and image_area / page_area > 0.8:
-                        return "SCANNED"
-
-        from pypdf import PdfReader
-
-        reader = PdfReader(file_path)
-        text = ""
-        for index in range(min(2, len(reader.pages))):
-            text += (reader.pages[index].extract_text() or "").strip()
-        return "DIGITAL" if len(text) > 100 else "SCANNED"
-    except PdfReadError as exc:
-        raise ValueError("The PDF appears to be encrypted, corrupted, or unreadable.") from exc
-    except Exception as exc:
-        logger.warning("Could not classify PDF %s: %s", file_path.name, exc)
-        return "SCANNED"
+    """Classify a PDF as DIGITAL or SCANNED for older callers."""
+    kind = classify_pdf_kind(file_path)
+    return "DIGITAL" if kind == DocumentKind.DIGITAL_PDF else "SCANNED"
 
 
 def validate_file(path: Path) -> None:
-    """Validate a PDF before extraction."""
-    if not path.exists():
-        raise FileNotFoundError(f"File not found: {path}")
+    """Validate that a file is a digital PDF suitable for text extraction."""
+    validate_upload_file(path)
     if path.suffix.lower() != ".pdf":
-        raise ValueError("Only PDF invoices are supported.")
-    size_mb = path.stat().st_size / (1024 * 1024)
-    if size_mb > MAX_FILE_SIZE_MB:
-        raise ValueError(f"File exceeds {MAX_FILE_SIZE_MB} MB limit.")
-    classification = classify_pdf(path)
-    if classification == "SCANNED":
-        raise ScannedDocumentException("Scanned document detected. Upload a system-generated PDF invoice.")
+        raise ValueError("Text extraction is only available for PDF invoices.")
+    if classify_pdf_kind(path) != DocumentKind.DIGITAL_PDF:
+        raise ScannedDocumentException("Scanned or image-only PDF detected. Use the multimodal parser route.")
 
 
 def extract_invoice_text(file_path: str | Path) -> str:

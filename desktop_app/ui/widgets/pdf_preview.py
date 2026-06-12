@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""PDF preview rendering and display widgets."""
+"""Invoice document preview rendering and display widgets."""
 
 import tempfile
 from pathlib import Path
@@ -10,6 +10,8 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel, QPushButton, QScrollArea, QToolBar, QVBoxLayout, QWidget
 
 from ..formatters import clear_layout
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 def render_pdf_to_images(pdf_path: Path, scale: float = 1.6, max_pages: int = 6) -> list[Path]:
@@ -39,8 +41,35 @@ def render_pdf_to_images(pdf_path: Path, scale: float = 1.6, max_pages: int = 6)
     return image_paths
 
 
+def render_image_to_images(image_path: Path, scale: float = 1.6) -> list[Path]:
+    """Render a supported invoice image to a temporary PNG preview file."""
+    from PIL import Image, ImageOps
+
+    output_dir = Path(tempfile.gettempdir()) / "invoice_ai_desktop_images"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with Image.open(image_path) as source:
+        image = ImageOps.exif_transpose(source)
+        if image.mode not in {"RGB", "RGBA"}:
+            image = image.convert("RGB")
+        target_width = max(360, int(900 * (scale / 1.6)))
+        if image.width > target_width:
+            ratio = target_width / image.width
+            target_size = (target_width, max(1, int(image.height * ratio)))
+            image = image.resize(target_size, Image.Resampling.LANCZOS)
+        target = output_dir / f"{image_path.stem}_{int(scale * 100)}.png"
+        image.save(target)
+    return [target]
+
+
+def render_document_to_images(document_path: Path, scale: float = 1.6) -> list[Path]:
+    """Render a PDF or image invoice into preview image files."""
+    if document_path.suffix.lower() in IMAGE_EXTENSIONS:
+        return render_image_to_images(document_path, scale)
+    return render_pdf_to_images(document_path, scale)
+
+
 class PdfPreview(QWidget):
-    """Scroll-based PDF image preview with basic zoom controls."""
+    """Scroll-based invoice document preview with basic zoom controls."""
 
     zoom_requested = Signal(float)
 
@@ -48,7 +77,7 @@ class PdfPreview(QWidget):
         """Create the PDF preview toolbar and page area."""
         super().__init__()
         self.zoom = 1.6
-        self.pdf_path: Path | None = None
+        self.document_path: Path | None = None
         layout = QVBoxLayout(self)
         toolbar = QToolBar()
         zoom_out = QPushButton("Zoom -")
@@ -60,7 +89,7 @@ class PdfPreview(QWidget):
         toolbar.addWidget(zoom_out)
         toolbar.addWidget(zoom_in)
         toolbar.addWidget(fit)
-        self.page_count_label = QLabel("No PDF")
+        self.page_count_label = QLabel("No document")
         toolbar.addWidget(self.page_count_label)
         layout.addWidget(toolbar)
         self.pages = QVBoxLayout()
@@ -75,16 +104,16 @@ class PdfPreview(QWidget):
         layout.addWidget(self.scroll, stretch=1)
         layout.addWidget(self.status)
 
-    def set_loading(self, pdf_path: Path) -> None:
+    def set_loading(self, document_path: Path) -> None:
         """Show a loading state before rendered pages are available."""
-        self.pdf_path = pdf_path
-        self.status.setText(str(pdf_path))
-        self.page_count_label.setText("Rendering PDF...")
+        self.document_path = document_path
+        self.status.setText(str(document_path))
+        self.page_count_label.setText("Rendering preview...")
         clear_layout(self.pages)
-        self.pages.addWidget(QLabel("Rendering PDF preview..."))
+        self.pages.addWidget(QLabel("Rendering invoice preview..."))
 
     def set_pages(self, image_paths: list[Path]) -> None:
-        """Display rendered PDF page images."""
+        """Display rendered document page images."""
         clear_layout(self.pages)
         for image_path in image_paths:
             page = QLabel()
@@ -96,9 +125,9 @@ class PdfPreview(QWidget):
         self.page_count_label.setText(f"{len(image_paths)} page(s)")
 
     def set_error(self, message: str) -> None:
-        """Show a PDF rendering error."""
+        """Show a document rendering error."""
         clear_layout(self.pages)
-        label = QLabel(f"Could not render PDF preview.\n{message}")
+        label = QLabel(f"Could not render invoice preview.\n{message}")
         label.setWordWrap(True)
         self.pages.addWidget(label)
         self.page_count_label.setText("Preview error")
@@ -106,6 +135,6 @@ class PdfPreview(QWidget):
     def set_zoom(self, zoom: float) -> None:
         """Update zoom for the next render request."""
         self.zoom = zoom
-        if self.pdf_path:
-            self.set_loading(self.pdf_path)
+        if self.document_path:
+            self.set_loading(self.document_path)
             self.zoom_requested.emit(zoom)

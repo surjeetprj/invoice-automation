@@ -1,7 +1,12 @@
 # Invoice AI Desktop App
 
 PySide6 desktop application for invoice upload, AI extraction, human review,
-audit logs, PDF preview, and export.
+audit logs, document preview, and purchase voucher export.
+
+Supported invoice uploads:
+- Digital PDF invoices
+- Scanned or image-only PDF invoices
+- PNG, JPG, JPEG, and WEBP image invoices
 
 ## Setup
 
