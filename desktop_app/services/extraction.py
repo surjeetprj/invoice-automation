@@ -3,8 +3,6 @@ from __future__ import annotations
 """PDF classification and text extraction helpers for desktop processing."""
 
 import logging
-import time
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import pdfplumber
@@ -24,20 +22,6 @@ TABLE_SETTINGS = {
 
 class ScannedDocumentException(Exception):
     """Raised when the uploaded PDF appears to be scanned/image-only."""
-
-
-@dataclass
-class ExtractionMetadata:
-    """Diagnostics captured during PDF text extraction."""
-
-    file_name: str = ""
-    file_size_bytes: int = 0
-    page_count: int = 0
-    table_count: int = 0
-    character_count: int = 0
-    extraction_time_ms: int = 0
-    has_tables: bool = False
-    quality_notes: list[str] = field(default_factory=list)
 
 
 def classify_pdf(file_path: Path) -> str:
@@ -66,9 +50,8 @@ def classify_pdf(file_path: Path) -> str:
         return "SCANNED"
 
 
-def validate_file(path: Path) -> list[str]:
-    """Validate a PDF before extraction and return quality notes."""
-    notes: list[str] = []
+def validate_file(path: Path) -> None:
+    """Validate a PDF before extraction."""
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
     if path.suffix.lower() != ".pdf":
@@ -76,28 +59,22 @@ def validate_file(path: Path) -> list[str]:
     size_mb = path.stat().st_size / (1024 * 1024)
     if size_mb > MAX_FILE_SIZE_MB:
         raise ValueError(f"File exceeds {MAX_FILE_SIZE_MB} MB limit.")
-    if size_mb < 0.005:
-        notes.append("Very small PDF; extraction quality may be poor.")
     classification = classify_pdf(path)
     if classification == "SCANNED":
         raise ScannedDocumentException("Scanned document detected. Upload a system-generated PDF invoice.")
-    return notes
 
 
-def extract_with_metadata(file_path: str | Path) -> tuple[str, ExtractionMetadata]:
-    """Extract layout-preserved PDF text, detected tables, and diagnostics."""
+def extract_invoice_text(file_path: str | Path) -> str:
+    """Extract layout-preserved PDF text plus detected Markdown tables."""
     path = Path(file_path)
-    notes = validate_file(path)
-    start = time.perf_counter()
+    validate_file(path)
     parts: list[str] = []
-    table_count = 0
     with pdfplumber.open(path) as pdf:
         page_count = len(pdf.pages)
         if page_count == 0:
             raise ValueError("The PDF does not contain any pages.")
         for page_number, page in enumerate(pdf.pages, start=1):
             page_text, page_tables = extract_page_content(page, page_number)
-            table_count += len(page_tables)
             parts.append(page_text)
             if page_tables:
                 parts.append(f"\n\n## Extracted Tables - Page {page_number}\n")
@@ -105,17 +82,7 @@ def extract_with_metadata(file_path: str | Path) -> tuple[str, ExtractionMetadat
     text = "\n\n".join(part for part in parts if part.strip())
     if not text.strip():
         raise ValueError("No selectable text was found in the PDF.")
-    elapsed_ms = int((time.perf_counter() - start) * 1000)
-    return text, ExtractionMetadata(
-        file_name=path.name,
-        file_size_bytes=path.stat().st_size,
-        page_count=page_count,
-        table_count=table_count,
-        character_count=len(text),
-        extraction_time_ms=elapsed_ms,
-        has_tables=table_count > 0,
-        quality_notes=notes,
-    )
+    return text
 
 
 def extract_page_content(page, page_number: int) -> tuple[str, list[str]]:

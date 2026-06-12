@@ -2,7 +2,6 @@ from __future__ import annotations
 
 """In-process application workflow used by the PySide6 desktop UI."""
 
-import json
 import logging
 import hashlib
 import shutil
@@ -15,6 +14,12 @@ from sqlalchemy import func, select
 
 from ..config import ALLOWED_EXTENSIONS, DUPLICATE_CHECK_ENABLED, InvoiceStatus, UPLOAD_DIR
 from ..db.models import AuditLog, Invoice
+from ..db.repository import (
+    invoice_data_from_invoice,
+    persist_extraction,
+    raw_markdown_from_invoice,
+    validation_from_invoice,
+)
 from ..db.session import init_db, session_scope
 from ..domain.schemas import (
     AuditLogRecord,
@@ -27,7 +32,7 @@ from ..domain.schemas import (
 )
 from .ai_parser import parse_invoice
 from .exporters import export_invoice_csv, export_invoice_json, export_invoice_tally, export_to_erpnext
-from .extraction import ScannedDocumentException, extract_with_metadata, validate_file
+from .extraction import ScannedDocumentException, extract_invoice_text, validate_file
 from ..domain.validation import calculate_confidence_score, validate_invoice
 
 logger = logging.getLogger(__name__)
@@ -174,7 +179,8 @@ class DesktopWorkflow:
                 invoice.reviewed_at = now
                 self.log(db, invoice.id, "HITL: Invoice APPROVED - status set to Approved", user=review.reviewer)
             elif review.decision == ReviewDecision.APPROVE_WITH_CORRECTIONS:
-                current = json.loads(invoice.extracted_data or "{}")
+                current_data = invoice_data_from_invoice(invoice) or InvoiceData()
+                current = current_data.model_dump(mode="json")
                 changed = []
                 for field, value in (review.corrections or {}).items():
                     if current.get(field) != value:
@@ -182,12 +188,9 @@ class DesktopWorkflow:
                         current[field] = value
                         changed.append(field)
                 data = InvoiceData(**current)
-                validation = validate_invoice(data, invoice.raw_markdown)
-                invoice.extracted_data = json.dumps(data.model_dump(mode="json"))
-                invoice.validation_result = json.dumps(validation.model_dump(mode="json"))
-                invoice.invoice_number_extracted = data.invoice_number
-                invoice.vendor_gstin = data.vendor_gstin
-                invoice.supply_type = data.supply_type.value if data.supply_type else None
+                raw_markdown = raw_markdown_from_invoice(invoice)
+                validation = validate_invoice(data, raw_markdown)
+                persist_extraction(db, invoice, data, validation, raw_markdown)
                 invoice.status = InvoiceStatus.APPROVED
                 invoice.reviewed_by = review.reviewer
                 invoice.reviewed_at = now
@@ -234,7 +237,9 @@ class DesktopWorkflow:
             invoice = self.require_invoice(db, invoice_id)
             if invoice.status not in {InvoiceStatus.APPROVED, InvoiceStatus.POSTED}:
                 raise ValueError("Export only allowed from Approved or Posted status.")
-            data = InvoiceData(**json.loads(invoice.extracted_data or "{}"))
+            data = invoice_data_from_invoice(invoice)
+            if data is None:
+                raise ValueError("No extracted invoice data is available for export.")
             if fmt == "csv":
                 content, filename = export_invoice_csv(invoice_id, data)
             elif fmt == "json":
@@ -261,11 +266,9 @@ class DesktopWorkflow:
         db.commit()
         self.log(db, invoice.id, "Status set to In_Process")
 
-        raw_markdown, meta = extract_with_metadata(file_path)
-        logger.info("PDF extraction finished for invoice #%s: %d chars", invoice.id, meta.character_count)
-        invoice.raw_markdown = raw_markdown
-        db.commit()
-        self.log(db, invoice.id, f"PDF extraction complete - {meta.character_count} chars, {meta.page_count} pages")
+        raw_markdown = extract_invoice_text(file_path)
+        logger.info("PDF extraction finished for invoice #%s: %d chars", invoice.id, len(raw_markdown))
+        self.log(db, invoice.id, f"PDF extraction complete - {len(raw_markdown)} chars")
 
         try:
             parsed = parse_invoice(raw_markdown, vendor_hint=invoice.filename)
@@ -285,14 +288,7 @@ class DesktopWorkflow:
         confidence = calculate_confidence_score(data, validation)
         data.confidence_score = confidence
 
-        invoice.extracted_data = json.dumps(data.model_dump(mode="json"))
-        invoice.validation_result = json.dumps(validation.model_dump(mode="json"))
-        invoice.invoice_number_extracted = data.invoice_number
-        invoice.invoice_date_extracted = data.date
-        invoice.total_amount_extracted = data.total_amount
-        invoice.vendor_gstin = data.vendor_gstin
-        invoice.supply_type = data.supply_type.value if data.supply_type else None
-        invoice.confidence_score = confidence
+        persist_extraction(db, invoice, data, validation, raw_markdown)
         invoice.status = InvoiceStatus.PENDING_REVIEW
         invoice.processing_time_ms = int((time.perf_counter() - start) * 1000)
         db.commit()
@@ -301,18 +297,8 @@ class DesktopWorkflow:
 
     def invoice_to_record(self, invoice: Invoice) -> InvoiceRecord:
         """Convert an ORM invoice into a display-ready Pydantic record."""
-        extracted = None
-        validation = None
-        if invoice.extracted_data:
-            try:
-                extracted = InvoiceData(**json.loads(invoice.extracted_data))
-            except Exception:
-                logger.exception("Could not parse extracted_data for invoice %s", invoice.id)
-        if invoice.validation_result:
-            try:
-                validation = ValidationResult(**json.loads(invoice.validation_result))
-            except Exception:
-                logger.exception("Could not parse validation_result for invoice %s", invoice.id)
+        extracted = invoice_data_from_invoice(invoice)
+        validation = validation_from_invoice(invoice) if extracted else None
         return InvoiceRecord(
             id=invoice.id,
             filename=invoice.filename,
@@ -321,7 +307,7 @@ class DesktopWorkflow:
             status=invoice.status,
             supply_type=invoice.supply_type,
             confidence_score=invoice.confidence_score,
-            raw_markdown=invoice.raw_markdown,
+            raw_markdown=raw_markdown_from_invoice(invoice),
             extracted_data=extracted,
             validation=validation,
             reviewed_by=invoice.reviewed_by,

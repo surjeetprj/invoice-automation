@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-"""SQLAlchemy ORM models for the desktop database."""
+"""SQLAlchemy ORM models for the normalized desktop database."""
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -18,7 +18,7 @@ def utcnow() -> datetime:
 
 
 class Invoice(Base):
-    """Persisted invoice record and extracted processing state."""
+    """Persisted invoice file, workflow, and review summary."""
 
     __tablename__ = "invoices"
     __table_args__ = (
@@ -34,9 +34,6 @@ class Invoice(Base):
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="New")
-    raw_markdown: Mapped[str | None] = mapped_column(Text, nullable=True)
-    extracted_data: Mapped[str | None] = mapped_column(Text, nullable=True)
-    validation_result: Mapped[str | None] = mapped_column(Text, nullable=True)
     invoice_number_extracted: Mapped[str | None] = mapped_column(String(100), nullable=True)
     invoice_date_extracted: Mapped[str | None] = mapped_column(String(30), nullable=True)
     total_amount_extracted: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -50,7 +47,161 @@ class Invoice(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=utcnow, nullable=True)
 
+    extraction: Mapped["InvoiceExtraction | None"] = relationship(
+        back_populates="invoice",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    validation_issues: Mapped[list["InvoiceValidationIssue"]] = relationship(
+        back_populates="invoice",
+        cascade="all, delete-orphan",
+        order_by="InvoiceValidationIssue.id",
+    )
     audit_logs: Mapped[list["AuditLog"]] = relationship(back_populates="invoice", cascade="all, delete-orphan")
+
+
+class InvoiceExtraction(Base):
+    """Scalar extracted invoice data and raw extraction text."""
+
+    __tablename__ = "invoice_extractions"
+    __table_args__ = (UniqueConstraint("invoice_id", name="uq_invoice_extractions_invoice_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    invoice_id: Mapped[int] = mapped_column(Integer, ForeignKey("invoices.id"), nullable=False)
+    raw_markdown: Mapped[str | None] = mapped_column(Text, nullable=True)
+    invoice_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    date: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    due_date: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    challan_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    challan_date: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    e_way_bill_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    supply_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    reverse_charge: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    irn: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ack_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ack_date: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    qr_code_data: Mapped[str | None] = mapped_column(Text, nullable=True)
+    vendor_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    vendor_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    vendor_gstin: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    vendor_state_code: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    vendor_pan: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    vendor_msme_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    vendor_contact: Mapped[str | None] = mapped_column(Text, nullable=True)
+    customer_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    customer_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    customer_gstin: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    customer_state_code: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    customer_pan: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    customer_phone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    place_of_supply: Mapped[str | None] = mapped_column(Text, nullable=True)
+    shipping_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    shipping_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    shipping_gstin: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    transport_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transport_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    vehicle_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    total_taxable_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    total_cgst: Mapped[float] = mapped_column(Float, default=0.0)
+    total_sgst: Mapped[float] = mapped_column(Float, default=0.0)
+    total_igst: Mapped[float] = mapped_column(Float, default=0.0)
+    total_cess: Mapped[float] = mapped_column(Float, default=0.0)
+    total_tax_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    round_off: Mapped[float] = mapped_column(Float, default=0.0)
+    total_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    amount_in_words: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bank_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    account_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ifsc: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    branch: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
+
+    invoice: Mapped[Invoice] = relationship(back_populates="extraction")
+    line_items: Mapped[list["InvoiceLineItem"]] = relationship(
+        back_populates="extraction",
+        cascade="all, delete-orphan",
+        order_by="InvoiceLineItem.position",
+    )
+    tax_breakups: Mapped[list["InvoiceTaxBreakup"]] = relationship(
+        back_populates="extraction",
+        cascade="all, delete-orphan",
+        order_by="InvoiceTaxBreakup.id",
+    )
+
+
+class InvoiceLineItem(Base):
+    """Extracted invoice line item."""
+
+    __tablename__ = "invoice_line_items"
+    __table_args__ = (Index("ix_invoice_line_items_extraction_id", "extraction_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    extraction_id: Mapped[int] = mapped_column(Integer, ForeignKey("invoice_extractions.id"), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sr_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    hsn_sac: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    quantity: Mapped[float] = mapped_column(Float, default=0.0)
+    unit: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    rate: Mapped[float] = mapped_column(Float, default=0.0)
+    discount: Mapped[float] = mapped_column(Float, default=0.0)
+    taxable_value: Mapped[float] = mapped_column(Float, default=0.0)
+    cess_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    total: Mapped[float] = mapped_column(Float, default=0.0)
+
+    extraction: Mapped[InvoiceExtraction] = relationship(back_populates="line_items")
+    taxes: Mapped[list["InvoiceLineTax"]] = relationship(
+        back_populates="line_item",
+        cascade="all, delete-orphan",
+        order_by="InvoiceLineTax.id",
+    )
+
+
+class InvoiceLineTax(Base):
+    """Tax component attached to one invoice line item."""
+
+    __tablename__ = "invoice_line_taxes"
+    __table_args__ = (Index("ix_invoice_line_taxes_line_item_id", "line_item_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    line_item_id: Mapped[int] = mapped_column(Integer, ForeignKey("invoice_line_items.id"), nullable=False)
+    tax_type: Mapped[str] = mapped_column(String(30), default="")
+    tax_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    taxable_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    tax_amount: Mapped[float] = mapped_column(Float, default=0.0)
+
+    line_item: Mapped[InvoiceLineItem] = relationship(back_populates="taxes")
+
+
+class InvoiceTaxBreakup(Base):
+    """Invoice-level tax breakup row."""
+
+    __tablename__ = "invoice_tax_breakups"
+    __table_args__ = (Index("ix_invoice_tax_breakups_extraction_id", "extraction_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    extraction_id: Mapped[int] = mapped_column(Integer, ForeignKey("invoice_extractions.id"), nullable=False)
+    tax_type: Mapped[str] = mapped_column(String(30), default="")
+    tax_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    taxable_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    tax_amount: Mapped[float] = mapped_column(Float, default=0.0)
+
+    extraction: Mapped[InvoiceExtraction] = relationship(back_populates="tax_breakups")
+
+
+class InvoiceValidationIssue(Base):
+    """Persisted validation error or warning shown by the UI."""
+
+    __tablename__ = "invoice_validation_issues"
+    __table_args__ = (Index("ix_invoice_validation_issues_invoice_id", "invoice_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    invoice_id: Mapped[int] = mapped_column(Integer, ForeignKey("invoices.id"), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    field: Mapped[str] = mapped_column(String(100), default="General")
+
+    invoice: Mapped[Invoice] = relationship(back_populates="validation_issues")
 
 
 class AuditLog(Base):
