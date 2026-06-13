@@ -30,10 +30,10 @@ from ..domain.schemas import (
     ReviewDecision,
     ValidationResult,
 )
-from .ai_parser import parse_invoice_source
-from .document_source import DocumentKind, classify_document, validate_upload_file
-from .exporters import export_invoice_csv, export_invoice_json, export_invoice_tally, export_to_erpnext
-from .extraction import ScannedDocumentException
+from .documents.document_source import DocumentKind, classify_document, validate_upload_file
+from .documents.extraction import ScannedDocumentException
+from .exports.exporters import export_invoice_csv, export_invoice_json, export_invoice_tally, export_to_erpnext
+from .parsing.ai_parser import parse_invoice_source
 from ..domain.validation import calculate_confidence_score, validate_invoice
 
 logger = logging.getLogger(__name__)

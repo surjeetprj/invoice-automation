@@ -9,10 +9,10 @@ from unittest.mock import Mock, patch
 
 from desktop_app.domain.parsing import parse_date, parse_decimal
 from desktop_app.domain.schemas import InvoiceData, LineItem, SupplyType, TaxDetail
-from desktop_app.services.ai_parser import enrich_from_raw_text, normalize_extracted_data, parse_invoice_source, to_float
-from desktop_app.services.document_source import DocumentKind, InvoiceSource, classify_document, mime_type_for_path, validate_upload_file
-from desktop_app.services.extraction import extract_page_content, table_to_markdown
-from desktop_app.ui.detail_page import build_line_item_taxes, cast_line_field, flatten_line_item_taxes
+from desktop_app.services.documents.document_source import DocumentKind, InvoiceSource, classify_document, mime_type_for_path, validate_upload_file
+from desktop_app.services.documents.extraction import extract_page_content, table_to_markdown
+from desktop_app.services.parsing.ai_parser import enrich_from_raw_text, normalize_extracted_data, parse_invoice_source, to_float
+from desktop_app.ui.widgets.line_items_table import build_line_item_taxes, cast_line_field, flatten_line_item_taxes
 from desktop_app.ui.widgets.pdf_preview import render_document_to_images
 from desktop_app.domain.validation import validate_gstin, validate_invoice, validate_supply_type
 
@@ -94,7 +94,7 @@ class DomainHelperTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "invoice.pdf"
             path.write_bytes(b"%PDF-1.4")
-            with patch("desktop_app.services.document_source.classify_pdf", return_value=DocumentKind.SCANNED_PDF):
+            with patch("desktop_app.services.documents.document_source.classify_pdf", return_value=DocumentKind.SCANNED_PDF):
                 source = classify_document(path)
 
         self.assertEqual(source.document_kind, DocumentKind.SCANNED_PDF)
@@ -118,8 +118,8 @@ class DomainHelperTests(unittest.TestCase):
         """Digital PDFs should use local text extraction plus text Gemini parser."""
         source = InvoiceSource(path=Path("invoice.pdf"), document_kind=DocumentKind.DIGITAL_PDF, mime_type="application/pdf")
         with (
-            patch("desktop_app.services.ai_parser.extract_invoice_text", return_value="raw text") as extract,
-            patch("desktop_app.services.ai_parser.invoke_invoice_parser", return_value={"invoice_number": "INV-1"}) as parse,
+            patch("desktop_app.services.parsing.ai_parser.extract_invoice_text", return_value="raw text") as extract,
+            patch("desktop_app.services.parsing.ai_parser.invoke_invoice_parser", return_value={"invoice_number": "INV-1"}) as parse,
         ):
             result = parse_invoice_source(source, vendor_hint="invoice.pdf")
 
@@ -133,8 +133,8 @@ class DomainHelperTests(unittest.TestCase):
         """Images should skip local text extraction and call the visual parser."""
         source = InvoiceSource(path=Path("invoice.png"), document_kind=DocumentKind.IMAGE, mime_type="image/png")
         with (
-            patch("desktop_app.services.ai_parser.extract_invoice_text") as extract,
-            patch("desktop_app.services.ai_parser.invoke_invoice_file_parser", return_value={"invoice_number": "IMG-1"}) as parse,
+            patch("desktop_app.services.parsing.ai_parser.extract_invoice_text") as extract,
+            patch("desktop_app.services.parsing.ai_parser.invoke_invoice_file_parser", return_value={"invoice_number": "IMG-1"}) as parse,
         ):
             result = parse_invoice_source(source, vendor_hint="invoice.png")
 
@@ -148,8 +148,8 @@ class DomainHelperTests(unittest.TestCase):
         """Scanned PDFs should skip local text extraction and call the visual parser."""
         source = InvoiceSource(path=Path("invoice.pdf"), document_kind=DocumentKind.SCANNED_PDF, mime_type="application/pdf")
         with (
-            patch("desktop_app.services.ai_parser.extract_invoice_text") as extract,
-            patch("desktop_app.services.ai_parser.invoke_invoice_file_parser", return_value={"invoice_number": "SCAN-1"}) as parse,
+            patch("desktop_app.services.parsing.ai_parser.extract_invoice_text") as extract,
+            patch("desktop_app.services.parsing.ai_parser.invoke_invoice_file_parser", return_value={"invoice_number": "SCAN-1"}) as parse,
         ):
             result = parse_invoice_source(source, vendor_hint="invoice.pdf")
 
@@ -161,7 +161,7 @@ class DomainHelperTests(unittest.TestCase):
 
     def test_visual_ai_client_returns_structured_invoice_data(self) -> None:
         """The visual Gemini client should return a schema-shaped dictionary."""
-        from desktop_app.services.ai_client import invoke_invoice_file_parser
+        from desktop_app.services.parsing.ai_client import invoke_invoice_file_parser
 
         class FakeResponse:
             parsed = InvoiceData(invoice_number="VIS-1")
@@ -172,7 +172,7 @@ class DomainHelperTests(unittest.TestCase):
             path = Path(temp_dir) / "invoice.png"
             path.write_bytes(b"fake image bytes")
             with (
-                patch("desktop_app.services.ai_client.GOOGLE_API_KEY", "test-key"),
+                patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
                 patch("google.genai.Client", return_value=fake_client),
             ):
                 result = invoke_invoice_file_parser(path, "image/png", "invoice.png")

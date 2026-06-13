@@ -6,7 +6,7 @@ audit logs, and exports.
 
 ## Processing Flow
 
-Uploads are validated and classified by `services/document_source.py`:
+Uploads are validated and classified by `services/documents/document_source.py`:
 
 - `DIGITAL_PDF`: uses `pdfplumber` layout text plus Markdown table extraction,
   then the text Gemini parser.
@@ -22,17 +22,17 @@ persistence, human review, and purchase voucher export.
 ## Key Modules
 
 - `services/workflow.py`: UI-facing invoice lifecycle orchestration.
-- `services/ai_parser.py`: parser facade for text and visual invoice sources.
-- `services/ai_client.py`: Gemini structured-output clients.
-- `services/extraction.py`: digital PDF text and table extraction.
-- `services/invoice_normalizer.py`: numeric, GST, total, and visual line-item
+- `services/parsing/ai_parser.py`: parser facade for text and visual invoice sources.
+- `services/parsing/ai_client.py`: Gemini structured-output clients.
+- `services/documents/extraction.py`: digital PDF text and table extraction.
+- `services/parsing/invoice_normalizer.py`: numeric, GST, total, and visual line-item
   reconciliation.
 - `domain/schemas.py`: Pydantic data contracts shared across layers.
 - `domain/validation.py`: GST and arithmetic validation rules.
 - `db/models.py`: normalized SQLAlchemy tables.
 - `db/repository.py`: conversion between ORM rows and Pydantic models.
 - `db/migrations.py`: safe startup migration for legacy JSON-based SQLite DBs.
-- `services/exporters.py`: CSV, JSON, Tally XML, and ERPNext purchase exports.
+- `services/exports/exporters.py`: CSV, JSON, Tally XML, and ERPNext purchase exports.
 - `ui/`: PySide6 pages and widgets.
 
 ## Persistence

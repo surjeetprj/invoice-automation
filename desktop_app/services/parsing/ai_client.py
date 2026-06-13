@@ -6,8 +6,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ..config import GOOGLE_API_KEY
-from ..domain.schemas import InvoiceData
+from ...config import GOOGLE_API_KEY
+from ...domain.schemas import InvoiceData
 from .ai_prompts import SYSTEM_PROMPT, VISUAL_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)

@@ -21,7 +21,10 @@ Important commands, run from `desktop_app`:
 Working rules:
 
 - Keep UI code in `desktop_app/ui`.
-- Keep workflow and parsing services in `desktop_app/services`.
+- Keep workflow orchestration in `desktop_app/services/workflow.py`.
+- Keep parsing services in `desktop_app/services/parsing`, document services in
+  `desktop_app/services/documents`, and export services in
+  `desktop_app/services/exports`.
 - Keep database models, repository helpers, and migrations in `desktop_app/db`.
 - Keep Pydantic schemas, parsing helpers, and validation in `desktop_app/domain`.
 - Do not commit `.env`, `.venv`, runtime uploads, exports, logs, or local SQLite databases.

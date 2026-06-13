@@ -10,7 +10,7 @@ from pathlib import Path
 import pdfplumber
 from pypdf.errors import PdfReadError
 
-from ..config import ALLOWED_EXTENSIONS, MAX_FILE_SIZE_MB
+from ...config import ALLOWED_EXTENSIONS, MAX_FILE_SIZE_MB
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 
 from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail
-from desktop_app.services.exporters import build_erpnext_purchase_invoice_payload, export_invoice_tally
+from desktop_app.services.exports.exporters import build_erpnext_purchase_invoice_payload, export_invoice_tally
 
 
 class ExporterTests(unittest.TestCase):

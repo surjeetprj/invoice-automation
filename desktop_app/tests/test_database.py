@@ -30,9 +30,9 @@ from desktop_app.db.repository import (
 )
 from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail, ValidationResult
 from desktop_app.domain.validation import validate_invoice
-from desktop_app.services.exporters import export_invoice_tally
+from desktop_app.services.exports.exporters import export_invoice_tally
 from desktop_app.services.workflow import DesktopWorkflow
-from desktop_app.ui.detail_page import build_line_item_taxes, flatten_line_item_taxes
+from desktop_app.ui.widgets.line_items_table import build_line_item_taxes, flatten_line_item_taxes
 
 
 class DatabasePersistenceTests(unittest.TestCase):

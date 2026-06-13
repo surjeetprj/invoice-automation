@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..domain.parsing import parse_date
+from ...domain.parsing import parse_date
 
 GSTIN_PATTERN = re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z][A-Z][A-Z0-9]\b", re.IGNORECASE)
 DATE_PATTERN = re.compile(

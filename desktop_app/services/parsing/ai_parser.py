@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..domain.schemas import InvoiceData, SupplyType
+from ...domain.schemas import InvoiceData, SupplyType
 from .ai_client import invoke_invoice_file_parser, invoke_invoice_parser
-from .document_source import DocumentKind, InvoiceSource, ParsedInvoiceResult
-from .extraction import extract_invoice_text
 from .invoice_normalizer import normalize_extracted_data, to_float
 from .raw_text_enrichment import enrich_from_raw_text
+from ..documents.document_source import DocumentKind, InvoiceSource, ParsedInvoiceResult
+from ..documents.extraction import extract_invoice_text
 
 
 def parse_invoice(raw_markdown: str, vendor_hint: str | None = None) -> dict[str, Any]:
