@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import Engine
@@ -28,7 +29,10 @@ from desktop_app.db.repository import (
     validation_from_invoice,
 )
 from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail, ValidationResult
+from desktop_app.domain.validation import validate_invoice
+from desktop_app.services.exporters import export_invoice_tally
 from desktop_app.services.workflow import DesktopWorkflow
+from desktop_app.ui.detail_page import build_line_item_taxes, flatten_line_item_taxes
 
 
 class DatabasePersistenceTests(unittest.TestCase):
@@ -141,6 +145,91 @@ class DatabasePersistenceTests(unittest.TestCase):
             self.assertEqual(record["raw_markdown"], "raw text")
             self.assertEqual(record["extracted_data"]["invoice_number"], "INV-1")
             self.assertEqual(record["validation"]["issues"], [])
+
+    def test_approve_with_corrections_preserves_nested_line_taxes_for_validation_and_export(self) -> None:
+        """Review-table corrections should not drop nested tax rows hidden from the grid."""
+        engine = self.make_engine()
+        Base.metadata.create_all(engine)
+        data = InvoiceData(
+            invoice_number="INV-CESS-1",
+            date="01-05-2026",
+            supply_type="INTER_STATE",
+            vendor_name="Vendor Pvt Ltd",
+            vendor_gstin="27ABCDE1234F1Z5",
+            customer_name="Customer Pvt Ltd",
+            customer_gstin="09AAOCS7654P3Z5",
+            place_of_supply="Uttar Pradesh",
+            line_items=[
+                LineItem(
+                    sr_no=1,
+                    description="Service",
+                    hsn_sac="9983",
+                    quantity=1,
+                    rate=1000,
+                    taxable_value=1000,
+                    taxes=[
+                        TaxDetail(tax_type="IGST", tax_rate=18, taxable_amount=1000, tax_amount=180),
+                        TaxDetail(tax_type="CESS", tax_rate=1, taxable_amount=1000, tax_amount=10),
+                    ],
+                    cess_amount=10,
+                    total=1190,
+                )
+            ],
+            tax_breakup=[
+                TaxDetail(tax_type="IGST", tax_rate=18, taxable_amount=1000, tax_amount=180),
+                TaxDetail(tax_type="CESS", tax_rate=1, taxable_amount=1000, tax_amount=10),
+            ],
+            total_taxable_amount=1000,
+            total_igst=180,
+            total_cess=10,
+            total_tax_amount=190,
+            total_amount=1190,
+        )
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = Invoice(filename="invoice.pdf", file_path="C:/tmp/invoice.pdf", status=InvoiceStatus.PENDING_REVIEW)
+            db.add(invoice)
+            db.flush()
+            persist_extraction(db, invoice, data, validate_invoice(data), "raw text")
+            db.commit()
+            invoice_id = invoice.id
+
+        original_line = data.line_items[0].model_dump(mode="json")
+        edited_values = flatten_line_item_taxes(original_line)
+        edited_values["description"] = "Corrected Service"
+        corrected_line = build_line_item_taxes(edited_values, original_item=original_line)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            workflow.submit_review(
+                invoice_id,
+                {
+                    "decision": "approve_with_corrections",
+                    "reviewer": "reviewer",
+                    "corrections": {"line_items": [corrected_line]},
+                },
+            )
+
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = db.get(Invoice, invoice_id)
+            self.assertIsNotNone(invoice)
+            assert invoice is not None
+            loaded = invoice_data_from_invoice(invoice)
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(invoice.status, InvoiceStatus.APPROVED)
+            self.assertEqual(loaded.line_items[0].description, "Corrected Service")
+            self.assertEqual([tax.tax_type for tax in loaded.line_items[0].taxes], ["IGST", "CESS"])
+            self.assertEqual(loaded.line_items[0].taxes[1].tax_amount, 10)
+            self.assertEqual([tax.tax_type for tax in loaded.tax_breakup], ["IGST", "CESS"])
+
+            validation = validate_invoice(loaded, raw_markdown_from_invoice(invoice))
+            self.assertTrue(validation.is_valid)
+            self.assertFalse(any("Tax amount mismatch" in warning for warning in validation.warnings))
+            tally_xml, filename = export_invoice_tally(invoice_id, loaded)
+            self.assertTrue(filename.endswith("_tally.xml"))
+            xml = tally_xml.decode("utf-8")
+            self.assertIn("<LEDGERNAME>Input IGST</LEDGERNAME>", xml)
+            self.assertIn("<LEDGERNAME>Input CESS</LEDGERNAME>", xml)
 
     def create_legacy_schema(
         self,

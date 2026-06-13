@@ -37,6 +37,7 @@ from .widgets.validation_pane import ValidationPane
 LINE_INT_FIELDS = {"sr_no"}
 INVALID_CELL_COLOR = QColor("#fee2e2")
 VALID_CELL_COLOR = QColor("#ffffff")
+ORIGINAL_LINE_ITEM_ROLE = Qt.ItemDataRole.UserRole
 
 
 class MetadataForm(QWidget):
@@ -128,10 +129,13 @@ class LineItemsTable(QWidget):
         self.loading = True
         self.table.setRowCount(len(items))
         for row, item in enumerate(items):
+            original_item = copy.deepcopy(item)
             flat_item = flatten_line_item_taxes(item)
             for col, (name, _label) in enumerate(LINE_COLUMNS):
                 value = flat_item.get(name)
                 cell = QTableWidgetItem("" if value is None else str(value))
+                if col == 0:
+                    cell.setData(ORIGINAL_LINE_ITEM_ROLE, original_item)
                 self.table.setItem(row, col, cell)
         self.loading = False
 
@@ -226,7 +230,16 @@ class LineItemsTable(QWidget):
 
     def values(self) -> list[dict[str, Any]]:
         """Return all line items as typed dictionaries."""
-        return [build_line_item_taxes(self.row_values(row)) for row in range(self.table.rowCount())]
+        return [
+            build_line_item_taxes(self.row_values(row), original_item=self.original_item_for_row(row))
+            for row in range(self.table.rowCount())
+        ]
+
+    def original_item_for_row(self, row: int) -> dict[str, Any] | None:
+        """Return the original nested line item associated with a table row."""
+        item = self.table.item(row, 0)
+        original = item.data(ORIGINAL_LINE_ITEM_ROLE) if item is not None else None
+        return copy.deepcopy(original) if isinstance(original, dict) else None
 
 
 class DetailPage(QWidget):
@@ -433,25 +446,39 @@ def flatten_line_item_taxes(item: dict[str, Any]) -> dict[str, Any]:
     return flattened
 
 
-def build_line_item_taxes(values: dict[str, Any]) -> dict[str, Any]:
-    """Rebuild nested GST tax rows from editable component columns."""
+def build_line_item_taxes(values: dict[str, Any], original_item: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Rebuild nested tax rows from editable columns while preserving hidden tax details."""
     item = {
         key: value
         for key, value in values.items()
         if key not in TAX_RATE_FIELDS and key not in TAX_AMOUNT_FIELDS
     }
     taxable_value = values.get("taxable_value") or 0.0
+    component_taxes = {
+        component.upper(): {
+            "tax_type": component.upper(),
+            "tax_rate": values.get(f"{component}_rate") or 0.0,
+            "taxable_amount": taxable_value,
+            "tax_amount": values.get(f"{component}_amount") or 0.0,
+        }
+        for component in TAX_COMPONENTS
+    }
     taxes = []
-    for component in TAX_COMPONENTS:
-        rate = values.get(f"{component}_rate") or 0.0
-        amount = values.get(f"{component}_amount") or 0.0
-        if rate > 0 or amount > 0:
-            taxes.append({
-                "tax_type": component.upper(),
-                "tax_rate": rate,
-                "taxable_amount": taxable_value,
-                "tax_amount": amount,
-            })
+    added_components: set[str] = set()
+    for tax in (original_item or {}).get("taxes") or []:
+        if not isinstance(tax, dict):
+            continue
+        tax_type = str(tax.get("tax_type") or "").strip().upper()
+        if tax_type in component_taxes:
+            component_tax = component_taxes[tax_type]
+            if tax_type not in added_components and (component_tax["tax_rate"] > 0 or component_tax["tax_amount"] > 0):
+                taxes.append(component_tax)
+                added_components.add(tax_type)
+            continue
+        taxes.append(dict(tax))
+    for tax_type, component_tax in component_taxes.items():
+        if tax_type not in added_components and (component_tax["tax_rate"] > 0 or component_tax["tax_amount"] > 0):
+            taxes.append(component_tax)
     item["taxes"] = taxes
     item["total"] = calculate_line_total(values)
     return item
