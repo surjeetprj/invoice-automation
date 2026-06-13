@@ -61,6 +61,14 @@ On first startup after an app update, Invoice AI upgrades an existing local
 backfilled into the normalized invoice tables while invoice summaries, review
 state, and audit logs are preserved. No manual runtime data cleanup is required.
 
+## Developer Context
+
+For architecture and safe-codebase context, see:
+
+- [`../AGENTS.md`](../AGENTS.md)
+- [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- [`DECISIONS.md`](DECISIONS.md)
+
 ## Developer Install
 
 Use editable install when changing code locally.
