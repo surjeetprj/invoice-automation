@@ -33,6 +33,10 @@ Important GST rules:
 - For INTRA_STATE invoices, tax should normally be CGST and SGST.
 - Use the taxable amount after line or invoice-level discount.
 - Preserve GST component rates and amounts in line item tax rows.
+- Extract all visible item rows when they can be read reliably.
+- If item rows are unclear or partially readable, return one summary purchase
+  line whose taxable value, GST rows, and total reconcile with invoice totals.
+- Do not mix a partially read item quantity/rate with invoice-level totals.
 - Extract Bill To and Ship To separately when both sections are visible.
 - Prefer the customer company/legal name over a contact person name.
 - Extract totals, round off, bank details, e-invoice fields, transport details,

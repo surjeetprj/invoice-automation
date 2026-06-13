@@ -19,10 +19,15 @@ def parse_invoice(raw_markdown: str, vendor_hint: str | None = None) -> dict[str
     return normalize_extracted_data(data)
 
 
-def parse_invoice_file(file_path, mime_type: str, vendor_hint: str | None = None) -> dict[str, Any]:
+def parse_invoice_file(
+    file_path,
+    mime_type: str,
+    vendor_hint: str | None = None,
+    document_kind: str | None = None,
+) -> dict[str, Any]:
     """Parse an image invoice or scanned PDF directly with Gemini vision."""
     data = invoke_invoice_file_parser(file_path, mime_type, vendor_hint)
-    return normalize_extracted_data(data)
+    return normalize_extracted_data(data, document_kind=document_kind)
 
 
 def parse_invoice_source(source: InvoiceSource, vendor_hint: str | None = None) -> ParsedInvoiceResult:
@@ -37,7 +42,7 @@ def parse_invoice_source(source: InvoiceSource, vendor_hint: str | None = None) 
             mime_type=source.mime_type,
         )
 
-    data = parse_invoice_file(source.path, source.mime_type, vendor_hint)
+    data = parse_invoice_file(source.path, source.mime_type, vendor_hint, document_kind=source.document_kind.value)
     return ParsedInvoiceResult(
         data=data,
         source_text=None,

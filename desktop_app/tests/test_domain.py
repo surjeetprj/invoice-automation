@@ -297,6 +297,109 @@ Description Qty Rate Amount
         self.assertEqual(data["total_igst"], 0.0)
         self.assertEqual(data["line_items"][0]["total"], 2700.0)
 
+    def test_visual_normalization_reconciles_invoice_8_style_state_tax_lines(self) -> None:
+        """Scanned invoices should prefer a balanced summary line when item rows are partial."""
+        data = normalize_extracted_data({
+            "invoice_number": "GD478260000172",
+            "date": "14-04-2026",
+            "vendor_name": "Abhay Footwear Pvt Ltd",
+            "total_taxable_amount": 73332.0,
+            "total_cgst": 1833.3,
+            "total_sgst": 1833.3,
+            "total_igst": 0.0,
+            "total_cess": 0.0,
+            "total_tax_amount": 3666.6,
+            "round_off": 0.0,
+            "total_amount": 76998.6,
+            "line_items": [{
+                "sr_no": 1,
+                "description": "WAVE TH-MACHO-AW25",
+                "hsn_sac": "64041920",
+                "quantity": 18,
+                "rate": 469,
+                "discount": 203.7,
+                "taxable_value": 8238.3,
+                "total": 76998.6,
+                "taxes": [
+                    {"tax_type": "CGST", "tax_rate": 2.5, "taxable_amount": 73332.0, "tax_amount": 1833.3},
+                    {"tax_type": "SGST", "tax_rate": 2.5, "taxable_amount": 73332.0, "tax_amount": 1833.3},
+                ],
+            }],
+        }, document_kind="SCANNED_PDF")
+
+        self.assertEqual(len(data["line_items"]), 1)
+        item = data["line_items"][0]
+        self.assertEqual(item["quantity"], 1.0)
+        self.assertEqual(item["rate"], 73332.0)
+        self.assertEqual(item["taxable_value"], 73332.0)
+        self.assertEqual(item["discount"], 0.0)
+        self.assertEqual(item["total"], 76998.6)
+        self.assertEqual([tax["tax_type"] for tax in item["taxes"]], ["CGST", "SGST"])
+        result = validate_invoice(InvoiceData(**data))
+        self.assertFalse(any("Taxable amount mismatch" in warning for warning in result.warnings))
+
+    def test_visual_normalization_reconciles_invoice_9_style_igst_lines(self) -> None:
+        """Image/scanned invoices should repair line totals from reliable invoice totals."""
+        data = normalize_extracted_data({
+            "invoice_number": "GD478260000175",
+            "date": "14-04-2026",
+            "vendor_name": "Abhay Footwear Pvt Ltd",
+            "total_taxable_amount": 40740.0,
+            "total_cgst": 0.0,
+            "total_sgst": 0.0,
+            "total_igst": 2037.0,
+            "total_cess": 0.0,
+            "total_tax_amount": 2037.0,
+            "round_off": 0.0,
+            "total_amount": 42777.0,
+            "line_items": [{
+                "sr_no": 1,
+                "description": "WAVE MU-MACHO-AW25",
+                "hsn_sac": "64041920",
+                "quantity": 200,
+                "rate": 469,
+                "discount": 203.7,
+                "taxable_value": 93596.3,
+                "total": 42777.0,
+                "taxes": [{"tax_type": "IGST", "tax_rate": 5.0, "taxable_amount": 40740.0, "tax_amount": 2037.0}],
+            }],
+        }, document_kind="IMAGE")
+
+        item = data["line_items"][0]
+        self.assertEqual(item["quantity"], 1.0)
+        self.assertEqual(item["rate"], 40740.0)
+        self.assertEqual(item["taxable_value"], 40740.0)
+        self.assertEqual(item["total"], 42777.0)
+        self.assertEqual(item["taxes"][0]["tax_type"], "IGST")
+        self.assertEqual(item["taxes"][0]["tax_rate"], 5.0)
+        result = validate_invoice(InvoiceData(**data))
+        self.assertFalse(any("Taxable amount mismatch" in warning for warning in result.warnings))
+
+    def test_digital_pdf_normalization_does_not_collapse_bad_line_items(self) -> None:
+        """Digital PDFs should keep strict line-item validation behavior."""
+        data = normalize_extracted_data({
+            "invoice_number": "GD478260000175",
+            "date": "14-04-2026",
+            "vendor_name": "Abhay Footwear Pvt Ltd",
+            "total_taxable_amount": 40740.0,
+            "total_igst": 2037.0,
+            "total_tax_amount": 2037.0,
+            "round_off": 0.0,
+            "total_amount": 42777.0,
+            "line_items": [{
+                "description": "WAVE MU-MACHO-AW25",
+                "quantity": 200,
+                "rate": 469,
+                "discount": 203.7,
+                "taxable_value": 93596.3,
+                "taxes": [{"tax_type": "IGST", "tax_rate": 5.0, "taxable_amount": 40740.0, "tax_amount": 2037.0}],
+            }],
+        }, document_kind="DIGITAL_PDF")
+
+        self.assertEqual(data["line_items"][0]["quantity"], 200)
+        result = validate_invoice(InvoiceData(**data))
+        self.assertTrue(any("line items (93596.30) and invoice total (40740.00)" in warning for warning in result.warnings))
+
     def test_validation_uses_component_tax_total_when_total_tax_amount_missing(self) -> None:
         """Validation should not fail grand total when only IGST aggregate is present."""
         invoice = InvoiceData(

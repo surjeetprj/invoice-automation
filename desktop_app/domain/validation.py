@@ -63,7 +63,10 @@ def validate_invoice(data: InvoiceData, raw_text: str | None = None) -> Validati
                     warnings.append(f"Line {index}: GST rate {effective}% is not a standard slab")
 
     if data.line_items and data.total_taxable_amount > 0 and abs(computed_taxable - data.total_taxable_amount) > MATH_TOLERANCE:
-        warnings.append("Taxable amount mismatch between line items and invoice total")
+        warnings.append(
+            f"Taxable amount mismatch between line items ({computed_taxable:.2f}) "
+            f"and invoice total ({data.total_taxable_amount:.2f})"
+        )
     effective_tax_total = effective_total_tax_amount(data, computed_tax)
     if effective_tax_total > 0 and computed_tax > 0 and abs(computed_tax - effective_tax_total) > MATH_TOLERANCE:
         warnings.append("Tax amount mismatch between line taxes and invoice total")
