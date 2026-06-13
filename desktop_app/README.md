@@ -54,6 +54,13 @@ python main.py
 Do not run `python desktop_app` from inside the `desktop_app` folder. That asks
 Python to open a file named `desktop_app`, which does not exist.
 
+## Upgrade Behavior
+
+On first startup after an app update, Invoice AI upgrades an existing local
+`InvoiceAI\invoices.db` in place when needed. Legacy JSON extraction fields are
+backfilled into the normalized invoice tables while invoice summaries, review
+state, and audit logs are preserved. No manual runtime data cleanup is required.
+
 ## Developer Install
 
 Use editable install when changing code locally.
