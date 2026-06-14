@@ -27,6 +27,9 @@ Working rules:
   `desktop_app/services/exports`.
 - Keep database models, repository helpers, and migrations in `desktop_app/db`.
 - Keep Pydantic schemas, parsing helpers, and validation in `desktop_app/domain`.
+- Improve AI extraction through Pydantic field descriptions, prompts, configurable
+  model choice, normalization, and validation before adding ad hoc post-LLM
+  enrichment modules.
 - Do not commit `.env`, `.venv`, runtime uploads, exports, logs, or local SQLite databases.
 - Do not delete local runtime data unless the user explicitly asks for cleanup.
 - Prefer preserving user invoice history, audit logs, and review state during upgrades.
