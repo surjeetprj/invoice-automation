@@ -15,15 +15,21 @@ Uploads are validated and classified by `services/documents/document_source.py`:
 - `IMAGE`: accepts PNG, JPG, JPEG, and WEBP files and uses Gemini multimodal
   parsing.
 
-All parser routes return the same `InvoiceData` shape. The data then passes
-through deterministic normalization, domain validation, normalized SQLite
-persistence, human review, and purchase voucher export.
+All parser routes return the same `InvoiceData` shape. Gemini uses structured
+output against that Pydantic schema, so field descriptions and system prompts
+are part of the extraction contract. The model defaults to
+`gemini-2.5-flash-lite` and can be changed with `GEMINI_MODEL` in `.env`.
+
+The extracted data then passes through deterministic normalization, domain
+validation, normalized SQLite persistence, human review, and purchase voucher
+export.
 
 ## Key Modules
 
 - `services/workflow.py`: UI-facing invoice lifecycle orchestration.
 - `services/parsing/ai_parser.py`: parser facade for text and visual invoice sources.
-- `services/parsing/ai_client.py`: Gemini structured-output clients.
+- `services/parsing/ai_client.py`: Gemini structured-output clients using the
+  configured model.
 - `services/documents/extraction.py`: digital PDF text and table extraction.
 - `services/parsing/invoice_normalizer.py`: numeric, GST, total, and visual line-item
   reconciliation.
