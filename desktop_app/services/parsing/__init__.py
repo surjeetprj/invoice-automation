@@ -1,1 +1,1 @@
-"""Invoice parsing, AI client, normalization, and enrichment services."""
+"""Invoice parsing, AI client, and normalization services."""
