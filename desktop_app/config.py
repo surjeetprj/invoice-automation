@@ -38,6 +38,8 @@ for directory in (RUNTIME_DIR, UPLOAD_DIR, EXPORT_DIR, LOG_DIR):
 
 DATABASE_URL = os.getenv("DESKTOP_DATABASE_URL", f"sqlite:///{(RUNTIME_DIR / 'invoices.db').as_posix()}")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
 ERPNEXT_URL = os.getenv("ERPNEXT_URL", "")
 ERPNEXT_API_KEY = os.getenv("ERPNEXT_API_KEY", "")
 ERPNEXT_API_SECRET = os.getenv("ERPNEXT_API_SECRET", "")
