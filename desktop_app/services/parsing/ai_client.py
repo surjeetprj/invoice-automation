@@ -6,12 +6,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ...config import GOOGLE_API_KEY
+from ...config import GEMINI_MODEL, GOOGLE_API_KEY
 from ...domain.schemas import InvoiceData
 from .ai_prompts import SYSTEM_PROMPT, VISUAL_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
-GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 
 def invoke_invoice_parser(raw_markdown: str, vendor_hint: str | None = None) -> dict[str, Any]:
