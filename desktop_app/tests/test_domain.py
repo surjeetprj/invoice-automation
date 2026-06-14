@@ -2,11 +2,14 @@ from __future__ import annotations
 
 """Regression tests for desktop parsing and validation helpers."""
 
+import sys
+import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+from desktop_app.config import DEFAULT_GEMINI_MODEL
 from desktop_app.domain.parsing import parse_date, parse_decimal
 from desktop_app.domain.schemas import InvoiceData, LineItem, SupplyType, TaxDetail
 from desktop_app.services.documents.document_source import DocumentKind, InvoiceSource, classify_document, mime_type_for_path, validate_upload_file
@@ -70,6 +73,10 @@ class DomainHelperTests(unittest.TestCase):
         self.assertIn("Return exactly one summary line", VISUAL_SYSTEM_PROMPT)
         self.assertIn("quantity = 1", VISUAL_SYSTEM_PROMPT)
         self.assertIn("rate = total_taxable_amount", VISUAL_SYSTEM_PROMPT)
+
+    def test_config_default_gemini_model_stays_flash_lite(self) -> None:
+        """The configurable Gemini model should keep the current default."""
+        self.assertEqual(DEFAULT_GEMINI_MODEL, "gemini-2.5-flash-lite")
 
     def test_ai_normalization_derives_missing_total_tax_amount(self) -> None:
         """Component tax totals should fill total_tax_amount when AI omits it."""
@@ -209,12 +216,57 @@ class DomainHelperTests(unittest.TestCase):
             path.write_bytes(b"fake image bytes")
             with (
                 patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
+                patch("desktop_app.services.parsing.ai_client.GEMINI_MODEL", "test-visual-model"),
                 patch("google.genai.Client", return_value=fake_client),
             ):
                 result = invoke_invoice_file_parser(path, "image/png", "invoice.png")
 
         self.assertEqual(result["invoice_number"], "VIS-1")
         fake_client.models.generate_content.assert_called_once()
+        self.assertEqual(fake_client.models.generate_content.call_args.kwargs["model"], "test-visual-model")
+
+    def test_text_ai_client_uses_configured_gemini_model(self) -> None:
+        """The text Gemini client should pass the configured model into LangChain."""
+        from desktop_app.services.parsing.ai_client import invoke_invoice_parser
+
+        class FakeResult:
+            def model_dump(self) -> dict[str, str]:
+                return {"invoice_number": "TXT-1"}
+
+        class FakeStructuredLLM:
+            def invoke(self, messages):
+                return FakeResult()
+
+        fake_llm = Mock()
+        fake_llm.with_structured_output.return_value = FakeStructuredLLM()
+        fake_chat = Mock(return_value=fake_llm)
+        fake_langchain_core = types.ModuleType("langchain_core")
+        fake_messages = types.ModuleType("langchain_core.messages")
+        fake_messages.HumanMessage = lambda content: ("human", content)
+        fake_messages.SystemMessage = lambda content: ("system", content)
+        fake_google_genai = types.ModuleType("langchain_google_genai")
+        fake_google_genai.ChatGoogleGenerativeAI = fake_chat
+
+        with (
+            patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
+            patch("desktop_app.services.parsing.ai_client.GEMINI_MODEL", "test-text-model"),
+            patch.dict(
+                sys.modules,
+                {
+                    "langchain_core": fake_langchain_core,
+                    "langchain_core.messages": fake_messages,
+                    "langchain_google_genai": fake_google_genai,
+                },
+            ),
+        ):
+            result = invoke_invoice_parser("raw invoice text", "invoice.pdf")
+
+        self.assertEqual(result["invoice_number"], "TXT-1")
+        fake_chat.assert_called_once_with(
+            model="test-text-model",
+            google_api_key="test-key",
+            temperature=0.0,
+        )
 
     def test_document_preview_accepts_image_path(self) -> None:
         """Image invoices should render into preview image paths."""
