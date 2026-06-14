@@ -28,6 +28,8 @@ Add your Gemini API key in `.env`:
 
 ```env
 GOOGLE_API_KEY=your_gemini_key
+# Optional: keep or change the Gemini extraction model.
+GEMINI_MODEL=gemini-2.5-flash-lite
 ```
 
 Run the app:
