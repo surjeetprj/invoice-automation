@@ -27,79 +27,148 @@ class ReviewDecision(str, Enum):
 class TaxDetail(BaseModel):
     """A single tax component such as CGST, SGST, IGST, or CESS."""
 
-    tax_type: str = ""
-    tax_rate: float = 0.0
-    taxable_amount: float = 0.0
-    tax_amount: float = 0.0
+    tax_type: str = Field(
+        default="",
+        description="GST component name exactly as visible, such as CGST, SGST, IGST, or CESS.",
+    )
+    tax_rate: float = Field(default=0.0, description="Visible tax rate percentage for this component.")
+    taxable_amount: float = Field(
+        default=0.0,
+        description="Taxable base amount to which this tax component applies.",
+    )
+    tax_amount: float = Field(default=0.0, description="Tax amount for this component.")
 
 
 class LineItem(BaseModel):
     """A single invoice product or service row."""
 
-    sr_no: int | None = None
-    description: str = ""
-    hsn_sac: str | None = None
-    quantity: float = 0.0
-    unit: str | None = None
-    rate: float = 0.0
-    discount: float = 0.0
-    taxable_value: float = 0.0
-    taxes: list[TaxDetail] = Field(default_factory=list)
-    cess_amount: float = 0.0
-    total: float = 0.0
+    sr_no: int | None = Field(default=None, description="Visible row serial number, if present.")
+    description: str = Field(default="", description="Visible product or service description for this row.")
+    hsn_sac: str | None = Field(default=None, description="Visible HSN or SAC code for this row.")
+    quantity: float = Field(
+        default=0.0,
+        description="Visible quantity only when it can be read reliably; do not guess from totals.",
+    )
+    unit: str | None = Field(default=None, description="Visible unit of measure, if present.")
+    rate: float = Field(
+        default=0.0,
+        description="Visible unit rate only when it can be read reliably; do not infer from unclear rows.",
+    )
+    discount: float = Field(default=0.0, description="Visible row discount amount, or 0 when absent.")
+    taxable_value: float = Field(
+        default=0.0,
+        description="Row taxable value after discount, before GST or cess.",
+    )
+    taxes: list[TaxDetail] = Field(
+        default_factory=list,
+        description="GST components for this row, preserving CGST, SGST, IGST, and CESS rates and amounts.",
+    )
+    cess_amount: float = Field(default=0.0, description="Visible cess amount for this row, or 0 when absent.")
+    total: float = Field(default=0.0, description="Visible row total including taxes when present.")
 
 
 class InvoiceData(BaseModel):
     """Complete structured invoice extraction payload."""
 
-    invoice_number: str | None = None
-    date: str | None = None
-    due_date: str | None = None
-    challan_no: str | None = None
-    challan_date: str | None = None
-    e_way_bill_no: str | None = None
-    supply_type: SupplyType = SupplyType.UNKNOWN
-    reverse_charge: str | None = None
-    irn: str | None = None
-    ack_number: str | None = None
-    ack_date: str | None = None
-    qr_code_data: str | None = None
-    vendor_name: str | None = None
-    vendor_address: str | None = None
-    vendor_gstin: str | None = None
-    vendor_state_code: str | None = None
-    vendor_pan: str | None = None
-    vendor_msme_no: str | None = None
-    vendor_contact: str | None = None
-    customer_name: str | None = None
-    customer_address: str | None = None
-    customer_gstin: str | None = None
-    customer_state_code: str | None = None
-    customer_pan: str | None = None
-    customer_phone: str | None = None
-    place_of_supply: str | None = None
-    shipping_name: str | None = None
-    shipping_address: str | None = None
-    shipping_gstin: str | None = None
-    transport_name: str | None = None
-    transport_id: str | None = None
-    vehicle_number: str | None = None
-    line_items: list[LineItem] = Field(default_factory=list)
-    total_taxable_amount: float = 0.0
-    tax_breakup: list[TaxDetail] = Field(default_factory=list)
-    total_cgst: float = 0.0
-    total_sgst: float = 0.0
-    total_igst: float = 0.0
-    total_cess: float = 0.0
-    total_tax_amount: float = 0.0
-    round_off: float = 0.0
-    total_amount: float = 0.0
-    amount_in_words: str | None = None
-    bank_name: str | None = None
-    account_no: str | None = None
-    ifsc: str | None = None
-    branch: str | None = None
-    confidence_score: float = 0.0
+    invoice_number: str | None = Field(default=None, description="Invoice number exactly as printed.")
+    date: str | None = Field(default=None, description="Invoice date in DD-MM-YYYY format.")
+    due_date: str | None = Field(
+        default=None,
+        description=(
+            "Payment due date from labels such as Due Date, Payment Due Date, Valid Upto, "
+            "or Valid Up To when a concrete date is visible. Use DD-MM-YYYY."
+        ),
+    )
+    challan_no: str | None = Field(default=None, description="Delivery challan number, if visible.")
+    challan_date: str | None = Field(default=None, description="Delivery challan date in DD-MM-YYYY format.")
+    e_way_bill_no: str | None = Field(default=None, description="E-way bill number, if visible.")
+    supply_type: SupplyType = Field(
+        default=SupplyType.UNKNOWN,
+        description="GST supply type derived from vendor and customer GSTIN state codes when possible.",
+    )
+    reverse_charge: str | None = Field(default=None, description="Reverse charge value or flag exactly as visible.")
+    irn: str | None = Field(default=None, description="Invoice Reference Number from e-invoice details.")
+    ack_number: str | None = Field(default=None, description="E-invoice acknowledgement number, if visible.")
+    ack_date: str | None = Field(default=None, description="E-invoice acknowledgement date in DD-MM-YYYY format.")
+    qr_code_data: str | None = Field(default=None, description="QR code text or decoded e-invoice data, if available.")
+    vendor_name: str | None = Field(default=None, description="Supplier or seller legal/company name.")
+    vendor_address: str | None = Field(default=None, description="Supplier or seller address.")
+    vendor_gstin: str | None = Field(default=None, description="Supplier GSTIN.")
+    vendor_state_code: str | None = Field(default=None, description="First two digits of supplier GSTIN when present.")
+    vendor_pan: str | None = Field(default=None, description="Supplier PAN derived from GSTIN or printed PAN.")
+    vendor_msme_no: str | None = Field(default=None, description="Supplier MSME/Udyam number, if visible.")
+    vendor_contact: str | None = Field(default=None, description="Supplier phone, email, or contact details.")
+    customer_name: str | None = Field(
+        default=None,
+        description="Billing customer legal/company name from Bill To/Billed To/Customer section.",
+    )
+    customer_address: str | None = Field(
+        default=None,
+        description="Billing customer address from Bill To/Billed To section; keep separate from Ship To.",
+    )
+    customer_gstin: str | None = Field(default=None, description="Billing customer GSTIN.")
+    customer_state_code: str | None = Field(default=None, description="First two digits of customer GSTIN when present.")
+    customer_pan: str | None = Field(default=None, description="Customer PAN derived from GSTIN or printed PAN.")
+    customer_phone: str | None = Field(default=None, description="Billing customer phone or contact number.")
+    place_of_supply: str | None = Field(default=None, description="Place/state of supply as printed or derived.")
+    shipping_name: str | None = Field(
+        default=None,
+        description=(
+            "Company/legal name from Ship To, Shipped To, Delivery To, or Consignee section. "
+            "Do not copy Bill To unless no separate shipping section exists."
+        ),
+    )
+    shipping_address: str | None = Field(
+        default=None,
+        description=(
+            "Full address from Ship To, Shipped To, Delivery To, or Consignee section, excluding labels and GSTIN. "
+            "Keep separate from billing customer address."
+        ),
+    )
+    shipping_gstin: str | None = Field(
+        default=None,
+        description="GSTIN from Ship To, Shipped To, Delivery To, or Consignee section when visible.",
+    )
+    transport_name: str | None = Field(default=None, description="Transporter name, if visible.")
+    transport_id: str | None = Field(default=None, description="Transporter ID or GSTIN, if visible.")
+    vehicle_number: str | None = Field(default=None, description="Vehicle number, if visible.")
+    line_items: list[LineItem] = Field(
+        default_factory=list,
+        description=(
+            "Complete visible invoice rows only. For scanned/image invoices, avoid guessing unreadable "
+            "quantity, rate, or discount; use one summary line when detailed rows are unreliable."
+        ),
+    )
+    total_taxable_amount: float = Field(
+        default=0.0,
+        description="Invoice-level taxable subtotal from the totals section before GST and cess.",
+    )
+    tax_breakup: list[TaxDetail] = Field(
+        default_factory=list,
+        description="Invoice-level GST breakup preserving CGST, SGST, IGST, and CESS components.",
+    )
+    total_cgst: float = Field(default=0.0, description="Invoice-level total CGST amount.")
+    total_sgst: float = Field(default=0.0, description="Invoice-level total SGST amount.")
+    total_igst: float = Field(default=0.0, description="Invoice-level total IGST amount.")
+    total_cess: float = Field(default=0.0, description="Invoice-level total cess amount.")
+    total_tax_amount: float = Field(
+        default=0.0,
+        description="Invoice-level total tax amount, normally CGST plus SGST plus IGST plus cess.",
+    )
+    round_off: float = Field(default=0.0, description="Invoice round-off adjustment, positive or negative.")
+    total_amount: float = Field(
+        default=0.0,
+        description="Final invoice grand total payable from the totals section.",
+    )
+    amount_in_words: str | None = Field(default=None, description="Grand total amount in words, if visible.")
+    bank_name: str | None = Field(default=None, description="Vendor bank name, if visible.")
+    account_no: str | None = Field(default=None, description="Vendor bank account number, if visible.")
+    ifsc: str | None = Field(default=None, description="Vendor bank IFSC code, if visible.")
+    branch: str | None = Field(default=None, description="Vendor bank branch, if visible.")
+    confidence_score: float = Field(
+        default=0.0,
+        description="Overall extraction confidence from 0.0 to 1.0, where 1.0 means all key fields were clear.",
+    )
 
 
 class FieldConfidence(BaseModel):
