@@ -11,7 +11,8 @@ from desktop_app.domain.parsing import parse_date, parse_decimal
 from desktop_app.domain.schemas import InvoiceData, LineItem, SupplyType, TaxDetail
 from desktop_app.services.documents.document_source import DocumentKind, InvoiceSource, classify_document, mime_type_for_path, validate_upload_file
 from desktop_app.services.documents.extraction import extract_page_content, table_to_markdown
-from desktop_app.services.parsing.ai_parser import enrich_from_raw_text, normalize_extracted_data, parse_invoice_source, to_float
+from desktop_app.services.parsing.ai_prompts import SYSTEM_PROMPT, VISUAL_SYSTEM_PROMPT
+from desktop_app.services.parsing.ai_parser import normalize_extracted_data, parse_invoice_source, to_float
 from desktop_app.ui.widgets.line_items_table import build_line_item_taxes, cast_line_field, flatten_line_item_taxes
 from desktop_app.ui.widgets.pdf_preview import render_document_to_images
 from desktop_app.domain.validation import validate_gstin, validate_invoice, validate_supply_type
@@ -34,6 +35,41 @@ class DomainHelperTests(unittest.TestCase):
         self.assertEqual(to_float("Rs. 1,200"), 1200.0)
         self.assertEqual(to_float("INR 5,310.50"), 5310.50)
         self.assertEqual(to_float(None), 0.0)
+
+    def test_invoice_schema_describes_high_risk_llm_fields(self) -> None:
+        """Structured output schema should guide the LLM on ambiguous invoice fields."""
+        invoice_properties = InvoiceData.model_json_schema()["properties"]
+        line_properties = LineItem.model_json_schema()["properties"]
+        tax_properties = TaxDetail.model_json_schema()["properties"]
+
+        self.assertIn("Payment Due Date", invoice_properties["due_date"]["description"])
+        self.assertIn("Ship To", invoice_properties["shipping_name"]["description"])
+        self.assertIn("Keep separate", invoice_properties["shipping_address"]["description"])
+        self.assertIn("Complete visible invoice rows", invoice_properties["line_items"]["description"])
+        self.assertIn("totals section", invoice_properties["total_taxable_amount"]["description"])
+        self.assertIn("0.0 to 1.0", invoice_properties["confidence_score"]["description"])
+        self.assertIn("do not guess", line_properties["quantity"]["description"])
+        self.assertIn("CGST, SGST, IGST, and CESS", line_properties["taxes"]["description"])
+        self.assertIn("Taxable base amount", tax_properties["taxable_amount"]["description"])
+
+    def test_ai_prompts_include_extraction_contracts(self) -> None:
+        """Prompts should reinforce schema behavior for text and visual invoices."""
+        for prompt in (SYSTEM_PROMPT, VISUAL_SYSTEM_PROMPT):
+            self.assertIn("Preserve nulls", prompt)
+            self.assertIn("do not hallucinate", prompt)
+            self.assertIn("DD-MM-YYYY", prompt)
+            self.assertIn("Bill To/Billed To/Customer", prompt)
+            self.assertIn("Ship To/Shipped To/Delivery To", prompt)
+            self.assertIn("Due Date, Payment Due Date, Valid Upto", prompt)
+            self.assertIn("CGST", prompt)
+            self.assertIn("SGST", prompt)
+            self.assertIn("IGST", prompt)
+            self.assertIn("CESS", prompt)
+
+        self.assertIn("Use both sources together", SYSTEM_PROMPT)
+        self.assertIn("Return exactly one summary line", VISUAL_SYSTEM_PROMPT)
+        self.assertIn("quantity = 1", VISUAL_SYSTEM_PROMPT)
+        self.assertIn("rate = total_taxable_amount", VISUAL_SYSTEM_PROMPT)
 
     def test_ai_normalization_derives_missing_total_tax_amount(self) -> None:
         """Component tax totals should fill total_tax_amount when AI omits it."""
@@ -191,28 +227,6 @@ class DomainHelperTests(unittest.TestCase):
 
         self.assertEqual(len(pages), 1)
         self.assertTrue(pages[0].exists())
-
-    def test_raw_text_enrichment_extracts_ship_to_block(self) -> None:
-        """Visible right-column Ship To data should be recovered if AI misses it."""
-        data = {"shipping_name": None, "shipping_address": None, "shipping_gstin": None}
-        raw_text = """
-Bill To                                  Ship To
-SISOFT TECHNOLOGIES PRIVATE LIMITED      SRC E7, SHIPRA RIVIERA BAZAR, GYAN KHAND-3,
-SRC E7, GHAZIABAD                        INDIRAPURAM, Ghaziabad,
-GSTIN 09AAOCS7654P3Z5                    Uttar Pradesh, 201014
-                                         India
-                                         GSTIN 09AAOCS7654P3Z5
-Description Qty Rate Amount
-"""
-        enrich_from_raw_text(data, raw_text)
-        self.assertIn("SHIPRA RIVIERA", data["shipping_address"])
-        self.assertEqual(data["shipping_gstin"], "09AAOCS7654P3Z5")
-
-    def test_raw_text_enrichment_extracts_due_date(self) -> None:
-        """A clearly labeled due date should be filled deterministically."""
-        data = {"due_date": None}
-        enrich_from_raw_text(data, "Invoice Date: 27-04-2026\nDue Date: 2027-04-27\n")
-        self.assertEqual(data["due_date"], "27-04-2027")
 
     def test_ai_normalization_updates_discounted_taxable_value(self) -> None:
         """Line taxable value should use quantity x rate minus visible discount."""
