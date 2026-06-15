@@ -21,6 +21,16 @@
 - GST rates must remain visible, editable, preserved through corrections, and
   available for export.
 - Exports represent purchase vouchers, not sales invoices.
+- Direct TallyPrime posting belongs in `services/tally`; downloadable CSV,
+  JSON, Tally XML, and ERPNext exports remain in `services/exports`.
+- Direct TallyPrime posting uses controlled master creation after reviewer
+  confirmation, not blind auto-creation.
+- TallyPrime v1 posting is ledger-only. Stock items and units are not created
+  from OCR text.
+- A successful direct TallyPrime post changes invoice status to `Posted`; a
+  failed post leaves the existing invoice status unchanged.
+- Vendor, purchase, and GST ledger masters may be synced to TallyPrime, but
+  the app relies on the configured ledger names as the stable mapping contract.
 - For scanned/image invoices, ERP-safe totals are preferred over unreliable
   item-level detail.
 - Failed AI parsing should still leave an invoice available for pending review.

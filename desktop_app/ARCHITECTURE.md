@@ -2,7 +2,7 @@
 
 Invoice AI Desktop is a monolithic PySide6 app. The UI calls
 `DesktopWorkflow`, which is the main facade for upload, processing, review,
-audit logs, and exports.
+audit logs, exports, and direct TallyPrime posting.
 
 ## Processing Flow
 
@@ -38,7 +38,10 @@ export.
 - `db/models.py`: normalized SQLAlchemy tables.
 - `db/repository.py`: conversion between ORM rows and Pydantic models.
 - `db/migrations.py`: safe startup migration for legacy JSON-based SQLite DBs.
-- `services/exports/exporters.py`: CSV, JSON, Tally XML, and ERPNext purchase exports.
+- `services/exports/exporters.py`: CSV, JSON, downloadable Tally XML, and
+  ERPNext purchase exports.
+- `services/tally/`: local TallyPrime HTTP/XML client, controlled master XML,
+  ledger-only purchase voucher XML, and response parsing for direct posting.
 - `ui/`: PySide6 pages and widgets.
 
 ## Persistence
@@ -56,6 +59,26 @@ repo in the configured app-data directory.
 Exports are purchase-voucher oriented. Tally XML uses Purchase voucher
 semantics and input tax ledgers. ERPNext export creates a Purchase Invoice
 payload with supplier, item rows, and GST tax rows.
+
+Downloadable exports stay in `services/exports`. Direct posting to a locally
+running TallyPrime instance is handled by `services/tally` and orchestrated by
+`DesktopWorkflow`.
+
+Direct TallyPrime posting follows a controlled flow:
+
+- Check the local TallyPrime HTTP endpoint and active company.
+- Preflight required masters for the approved invoice.
+- Ask the reviewer before creating missing masters.
+- Create or sync the vendor ledger, purchase ledger, GST ledgers, and purchase
+  voucher type where allowed.
+- Post a ledger-only purchase voucher.
+- Mark the invoice as `Posted` only after Tally accepts the voucher.
+
+Master creation is intentionally limited. Vendor ledgers are created under
+`Sundry Creditors`, purchase ledgers under `Purchase Accounts`, and input tax
+ledgers under `Duties & Taxes`. Stock items and units are not created in this
+version because OCR item text is not reliable enough to prevent duplicate or
+incorrect inventory masters.
 
 For scanned/image invoices, reliable invoice totals are preferred over
 unreliable visual line-item detail. If visual line rows do not reconcile with

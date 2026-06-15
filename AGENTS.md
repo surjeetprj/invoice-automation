@@ -25,6 +25,9 @@ Working rules:
 - Keep parsing services in `desktop_app/services/parsing`, document services in
   `desktop_app/services/documents`, and export services in
   `desktop_app/services/exports`.
+- Keep direct TallyPrime HTTP/XML posting services in
+  `desktop_app/services/tally`; file-based downloadable exports remain in
+  `desktop_app/services/exports`.
 - Keep database models, repository helpers, and migrations in `desktop_app/db`.
 - Keep Pydantic schemas, parsing helpers, and validation in `desktop_app/domain`.
 - Improve AI extraction through Pydantic field descriptions, prompts, configurable
