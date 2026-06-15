@@ -161,7 +161,7 @@ class DetailPage(QWidget):
         self.export_btn.setText("Export Data")
         self.export_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(self.export_btn)
-        for fmt, label in [("csv", "CSV"), ("json", "JSON"), ("tally", "Tally XML"), ("erpnext", "ERPNext")]:
+        for fmt, label in [("csv", "CSV"), ("json", "JSON"), ("tally", "Tally XML"), ("tally_post", "Post to TallyPrime"), ("tally_vendor", "Sync Vendor Master"), ("tally_ledgers", "Sync GST Ledgers"), ("erpnext", "ERPNext")]:
             action = QAction(label, self)
             action.triggered.connect(lambda _checked=False, f=fmt: self.request_export(f))
             menu.addAction(action)

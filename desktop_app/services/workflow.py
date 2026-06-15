@@ -34,6 +34,7 @@ from .documents.document_source import DocumentKind, classify_document, validate
 from .documents.extraction import ScannedDocumentException
 from .exports.exporters import export_invoice_csv, export_invoice_json, export_invoice_tally, export_to_erpnext
 from .parsing.ai_parser import parse_invoice_source
+from .tally import TallyClient
 from ..domain.validation import calculate_confidence_score, validate_invoice
 
 logger = logging.getLogger(__name__)
@@ -261,6 +262,97 @@ class DesktopWorkflow:
             else:
                 raise ValueError(f"Unsupported export format: {fmt}")
             return content, filename
+
+    def tally_preflight(self, invoice_id: int) -> dict[str, Any]:
+        """Return missing TallyPrime masters for an approved invoice."""
+        self.initialize()
+        logger.info("Tally preflight requested for invoice #%s", invoice_id)
+        with session_scope() as db:
+            invoice = self.require_invoice(db, invoice_id)
+            if invoice.status not in {InvoiceStatus.APPROVED, InvoiceStatus.POSTED}:
+                raise ValueError("Tally posting only allowed from Approved or Posted status.")
+            data = invoice_data_from_invoice(invoice)
+            if data is None:
+                raise ValueError("No extracted invoice data is available for Tally posting.")
+            client = TallyClient()
+            client.check_connection()
+            preflight = client.preflight_purchase_invoice(data)
+            return {
+                "missing_masters": preflight.missing_labels(),
+                "has_missing": preflight.has_missing,
+            }
+
+    def post_invoice_to_tally(self, invoice_id: int, *, create_missing_masters: bool = False) -> dict[str, Any]:
+        """Create confirmed missing masters and post an approved invoice to TallyPrime."""
+        self.initialize()
+        logger.info("Tally posting requested for invoice #%s", invoice_id)
+        with session_scope() as db:
+            invoice = self.require_invoice(db, invoice_id)
+            if invoice.status not in {InvoiceStatus.APPROVED, InvoiceStatus.POSTED}:
+                raise ValueError("Tally posting only allowed from Approved or Posted status.")
+            data = invoice_data_from_invoice(invoice)
+            if data is None:
+                raise ValueError("No extracted invoice data is available for Tally posting.")
+            client = TallyClient()
+            client.check_connection()
+            preflight = client.preflight_purchase_invoice(data)
+            if preflight.has_missing:
+                if not create_missing_masters:
+                    return {
+                        "success": False,
+                        "requires_confirmation": True,
+                        "missing_masters": preflight.missing_labels(),
+                    }
+                master_response = client.create_missing_masters(preflight.missing_masters)
+                if not master_response.success:
+                    raise ValueError(f"Tally master creation failed: {master_response.summary}")
+                self.log(db, invoice.id, f"TallyPrime masters created: {master_response.summary}")
+            vendor_response = client.sync_vendor_master(data)
+            if vendor_response.success:
+                self.log(db, invoice.id, f"TallyPrime vendor master synced: {vendor_response.summary}")
+            ledgers_response = client.sync_system_ledgers()
+            if ledgers_response.success:
+                self.log(db, invoice.id, f"TallyPrime purchase/GST ledgers synced: {ledgers_response.summary}")
+            voucher_response = client.post_purchase_voucher(invoice.id, data)
+            if not voucher_response.success:
+                raise ValueError(f"TallyPrime voucher posting failed: {voucher_response.summary}")
+            invoice.status = InvoiceStatus.POSTED
+            db.commit()
+            self.log(db, invoice.id, f"Pushed to TallyPrime ({voucher_response.summary}) - status set to Posted")
+            return {"success": True, "message": "Invoice posted to TallyPrime.", "tally_response": voucher_response.summary}
+
+    def sync_vendor_master_to_tally(self, invoice_id: int) -> dict[str, Any]:
+        """Update the TallyPrime vendor ledger with extracted invoice vendor details."""
+        self.initialize()
+        logger.info("Tally vendor master sync requested for invoice #%s", invoice_id)
+        with session_scope() as db:
+            invoice = self.require_invoice(db, invoice_id)
+            data = invoice_data_from_invoice(invoice)
+            if data is None:
+                raise ValueError("No extracted invoice data is available for Tally vendor sync.")
+            client = TallyClient()
+            client.check_connection()
+            response = client.sync_vendor_master(data)
+            if not response.success:
+                raise ValueError(f"TallyPrime vendor master sync failed: {response.summary}")
+            self.log(db, invoice.id, f"TallyPrime vendor master synced: {response.summary}")
+            return {"success": True, "message": "Vendor master synced to TallyPrime.", "tally_response": response.summary}
+
+    def sync_tally_system_ledgers(self, invoice_id: int | None = None) -> dict[str, Any]:
+        """Update configured purchase and GST ledgers in TallyPrime."""
+        self.initialize()
+        logger.info("Tally system ledger sync requested")
+        with session_scope() as db:
+            if invoice_id is not None:
+                self.require_invoice(db, invoice_id)
+            client = TallyClient()
+            client.check_connection()
+            response = client.sync_system_ledgers()
+            if not response.success:
+                raise ValueError(f"TallyPrime ledger sync failed: {response.summary}")
+            if invoice_id is not None:
+                self.log(db, invoice_id, f"TallyPrime purchase/GST ledgers synced: {response.summary}")
+            return {"success": True, "message": "Purchase and GST ledgers synced to TallyPrime.", "tally_response": response.summary}
 
     def run_pipeline(self, db, invoice: Invoice, file_path: Path) -> None:
         """Execute extraction, AI parsing, validation, and persistence."""
