@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from desktop_app.config import InvoiceStatus
+from desktop_app.config import INPUT_CESS_LEDGER_NAME, InvoiceStatus
 from desktop_app.db.migrations import LEGACY_EXTRACTED_DATA_WARNING, apply_startup_migrations
 from desktop_app.db.models import (
     AuditLog,
@@ -229,7 +229,7 @@ class DatabasePersistenceTests(unittest.TestCase):
             self.assertTrue(filename.endswith("_tally.xml"))
             xml = tally_xml.decode("utf-8")
             self.assertIn("<LEDGERNAME>Input IGST</LEDGERNAME>", xml)
-            self.assertIn("<LEDGERNAME>Input CESS</LEDGERNAME>", xml)
+            self.assertIn(f"<LEDGERNAME>{INPUT_CESS_LEDGER_NAME}</LEDGERNAME>", xml)
 
     def create_legacy_schema(
         self,
