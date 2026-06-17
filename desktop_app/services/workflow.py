@@ -282,8 +282,31 @@ class DesktopWorkflow:
                 "has_missing": preflight.has_missing,
             }
 
+    def tally_inventory_preflight(self, invoice_id: int) -> dict[str, Any]:
+        """Return missing stock/unit masters for an approved invoice item post."""
+        self.initialize()
+        logger.info("Tally inventory preflight requested for invoice #%s", invoice_id)
+        with session_scope() as db:
+            invoice = self.require_invoice(db, invoice_id)
+            if invoice.status not in {InvoiceStatus.APPROVED, InvoiceStatus.POSTED}:
+                raise ValueError("Tally item posting only allowed from Approved or Posted status.")
+            data = invoice_data_from_invoice(invoice)
+            if data is None:
+                raise ValueError("No extracted invoice data is available for Tally item posting.")
+            client = TallyClient()
+            preflight = client.preflight_inventory_purchase_invoice(data)
+            return {
+                "missing_masters": preflight.missing_labels(),
+                "has_missing": preflight.has_missing,
+            }
+
     def post_invoice_to_tally(self, invoice_id: int, *, create_missing_masters: bool = False) -> dict[str, Any]:
-        """Create confirmed missing masters and post an approved invoice to TallyPrime."""
+        """Post an approved invoice as a ledger-only Purchase voucher to TallyPrime.
+
+        This path creates confirmed missing accounting masters, syncs the vendor
+        ledger and purchase/GST ledgers, and posts a Purchase voucher without
+        inventory item rows.
+        """
         self.initialize()
         logger.info("Tally posting requested for invoice #%s", invoice_id)
         with session_scope() as db:
@@ -320,6 +343,52 @@ class DesktopWorkflow:
             db.commit()
             self.log(db, invoice.id, f"Pushed to TallyPrime ({voucher_response.summary}) - status set to Posted")
             return {"success": True, "message": "Invoice posted to TallyPrime.", "tally_response": voucher_response.summary}
+
+    def post_invoice_items_to_tally(self, invoice_id: int, *, create_missing_masters: bool = False) -> dict[str, Any]:
+        """Post an approved invoice as an item-wise Purchase voucher to TallyPrime.
+
+        This path creates confirmed missing inventory masters, syncs the vendor
+        ledger, purchase/GST ledgers, and stock item HSN/GST metadata, then posts
+        a Purchase voucher with inventory item rows.
+        """
+        self.initialize()
+        logger.info("Tally item posting requested for invoice #%s", invoice_id)
+        with session_scope() as db:
+            invoice = self.require_invoice(db, invoice_id)
+            if invoice.status not in {InvoiceStatus.APPROVED, InvoiceStatus.POSTED}:
+                raise ValueError("Tally item posting only allowed from Approved or Posted status.")
+            data = invoice_data_from_invoice(invoice)
+            if data is None:
+                raise ValueError("No extracted invoice data is available for Tally item posting.")
+            client = TallyClient()
+            preflight = client.preflight_inventory_purchase_invoice(data)
+            if preflight.has_missing:
+                if not create_missing_masters:
+                    return {
+                        "success": False,
+                        "requires_confirmation": True,
+                        "missing_masters": preflight.missing_labels(),
+                    }
+                master_response = client.create_missing_inventory_masters(preflight.missing_masters)
+                if not master_response.success:
+                    raise ValueError(f"Tally inventory master creation failed: {master_response.summary}")
+                self.log(db, invoice.id, f"TallyPrime inventory masters created: {master_response.summary}")
+            vendor_response = client.sync_vendor_master(data)
+            if vendor_response.success:
+                self.log(db, invoice.id, f"TallyPrime vendor master synced: {vendor_response.summary}")
+            ledgers_response = client.sync_system_ledgers()
+            if ledgers_response.success:
+                self.log(db, invoice.id, f"TallyPrime purchase/GST ledgers synced: {ledgers_response.summary}")
+            stock_items_response = client.sync_inventory_item_masters(data)
+            if stock_items_response.success:
+                self.log(db, invoice.id, f"TallyPrime stock item masters synced: {stock_items_response.summary}")
+            voucher_response = client.post_inventory_purchase_voucher(invoice.id, data)
+            if not voucher_response.success:
+                raise ValueError(f"TallyPrime item voucher posting failed: {voucher_response.summary}")
+            invoice.status = InvoiceStatus.POSTED
+            db.commit()
+            self.log(db, invoice.id, f"Pushed item-wise to TallyPrime ({voucher_response.summary}) - status set to Posted")
+            return {"success": True, "message": "Invoice items posted to TallyPrime.", "tally_response": voucher_response.summary}
 
     def sync_vendor_master_to_tally(self, invoice_id: int) -> dict[str, Any]:
         """Update the TallyPrime vendor ledger with extracted invoice vendor details."""

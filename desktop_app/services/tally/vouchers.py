@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Ledger-only TallyPrime purchase voucher XML builders."""
+"""Ledger-only and inventory-based TallyPrime purchase voucher XML builders."""
 
 from datetime import datetime
 from xml.etree.ElementTree import Element, SubElement, indent, tostring
@@ -9,11 +9,119 @@ from ...config import PURCHASE_LEDGER_NAME, TALLY_COMPANY
 from ...domain.parsing import parse_date
 from ...domain.schemas import InvoiceData, SupplyType
 from ..exports.exporters import tally_tax_ledgers, tax_components_for_item
-from .masters import add_text
+from .masters import (
+    PURCHASE_VOUCHER_TYPE,
+    add_text,
+    address_lines,
+    normalize_stock_item_name,
+    normalize_unit_name,
+    pincode_from_address,
+    vendor_state,
+)
+
+ACCOUNTING_VOUCHER_VIEW = "Accounting Voucher View"
+INVOICE_VOUCHER_VIEW = "Invoice Voucher View"
+ITEM_INVOICE_MODE = "Item Invoice"
+DEFAULT_GODOWN = "Main Location"
+DEFAULT_BATCH = "Primary Batch"
 
 
 def build_purchase_voucher_xml(invoice_id: int, data: InvoiceData) -> bytes:
-    """Build a ledger-only purchase voucher import envelope."""
+    """Build a ledger-only Purchase voucher import envelope."""
+    envelope, voucher = build_voucher_envelope(invoice_id, data, objview=ACCOUNTING_VOUCHER_VIEW)
+    add_text(voucher, "PERSISTEDVIEW", ACCOUNTING_VOUCHER_VIEW)
+    add_text(voucher, "ISINVOICE", "No")
+    add_ledger_entry(voucher, vendor_display_name(data), -abs(data.total_amount), deemed_positive=True)
+    purchase_entry = add_ledger_entry(voucher, PURCHASE_LEDGER_NAME, data.total_taxable_amount, deemed_positive=False)
+    if can_post_detailed_gst(data):
+        add_purchase_gst_details(purchase_entry, data, tally_date(data.date))
+    for name, amount in tally_tax_ledgers(data):
+        if amount > 0:
+            tax_entry = add_ledger_entry(voucher, name, amount, deemed_positive=False)
+            add_tax_ledger_gst_details(tax_entry, name, data)
+    if data.round_off:
+        add_ledger_entry(voucher, "Round Off", data.round_off, deemed_positive=data.round_off < 0)
+    indent(envelope, space="  ")
+    return tostring(envelope, encoding="utf-8", xml_declaration=True)
+
+
+def build_inventory_purchase_voucher_xml(invoice_id: int, data: InvoiceData) -> bytes:
+    """Build an item-wise/inventory Purchase voucher import envelope."""
+    envelope, voucher = build_voucher_envelope(invoice_id, data, objview=INVOICE_VOUCHER_VIEW)
+    add_text(voucher, "PERSISTEDVIEW", INVOICE_VOUCHER_VIEW)
+    add_text(voucher, "ISINVOICE", "Yes")
+    add_text(voucher, "VCHENTRYMODE", ITEM_INVOICE_MODE)
+    add_text(voucher, "PARTYNAME", vendor_display_name(data))
+    add_text(voucher, "BASICBASEPARTYNAME", vendor_display_name(data))
+    add_text(voucher, "PARTYMAILINGNAME", vendor_display_name(data))
+    if TALLY_COMPANY:
+        add_text(voucher, "BASICBUYERNAME", TALLY_COMPANY)
+        add_text(voucher, "CONSIGNEEMAILINGNAME", TALLY_COMPANY)
+        add_text(voucher, "CONSIGNEECOUNTRYNAME", "India")
+    state_name = vendor_state(data)
+    if state_name:
+        add_text(voucher, "STATENAME", state_name)
+    if data.vendor_gstin or data.vendor_address:
+        add_text(voucher, "COUNTRYOFRESIDENCE", "India")
+    pincode = pincode_from_address(data.vendor_address)
+    if pincode:
+        add_text(voucher, "PARTYPINCODE", pincode)
+    mailing_lines = address_lines(data.vendor_address)
+    if mailing_lines:
+        list_node = SubElement(voucher, "ADDRESS.LIST", TYPE="String")
+        for line in mailing_lines:
+            add_text(list_node, "ADDRESS", line)
+
+    for item in data.line_items:
+        inventory_entry = SubElement(voucher, "ALLINVENTORYENTRIES.LIST")
+        stock_item_name = normalize_stock_item_name(item.description)
+        unit_name = tally_unit_text(item.unit)
+        add_text(inventory_entry, "STOCKITEMNAME", stock_item_name)
+        add_text(inventory_entry, "GSTOVRDNTAXABILITY", "Taxable")
+        add_text(inventory_entry, "GSTSOURCETYPE", "Stock Item")
+        add_text(inventory_entry, "GSTITEMSOURCE", stock_item_name)
+        add_text(inventory_entry, "HSNSOURCETYPE", "Stock Item")
+        add_text(inventory_entry, "HSNITEMSOURCE", stock_item_name)
+        add_text(inventory_entry, "GSTOVRDNTYPEOFSUPPLY", item_supply_type(item))
+        add_text(inventory_entry, "GSTRATEINFERAPPLICABILITY", "As per Masters/Company")
+        add_text(inventory_entry, "GSTHSNINFERAPPLICABILITY", "As per Masters/Company")
+        add_text(inventory_entry, "ISDEEMEDPOSITIVE", "Yes")
+        add_text(inventory_entry, "AMOUNT", f"-{abs(item.taxable_value):.2f}")
+        add_text(inventory_entry, "ACTUALQTY", quantity_text(item.quantity, unit_name))
+        add_text(inventory_entry, "BILLEDQTY", quantity_text(item.quantity, unit_name))
+        add_text(inventory_entry, "RATE", rate_text(item.rate, unit_name))
+        if item.hsn_sac:
+            hsn_code = item.hsn_sac.strip()
+            add_text(inventory_entry, "HSNCODE", hsn_code)
+            add_text(inventory_entry, "GSTHSNNAME", hsn_code)
+        batch = SubElement(inventory_entry, "BATCHALLOCATIONS.LIST")
+        add_text(batch, "GODOWNNAME", DEFAULT_GODOWN)
+        add_text(batch, "BATCHNAME", DEFAULT_BATCH)
+        add_text(batch, "AMOUNT", f"-{abs(item.taxable_value):.2f}")
+        add_text(batch, "ACTUALQTY", quantity_text(item.quantity, unit_name))
+        add_text(batch, "BILLEDQTY", quantity_text(item.quantity, unit_name))
+        allocation = SubElement(inventory_entry, "ACCOUNTINGALLOCATIONS.LIST")
+        add_text(allocation, "LEDGERNAME", PURCHASE_LEDGER_NAME)
+        add_text(allocation, "ISDEEMEDPOSITIVE", "Yes")
+        add_text(allocation, "AMOUNT", f"-{abs(item.taxable_value):.2f}")
+        for duty_head, rate in item_gst_rate_details(item, data):
+            rate_details = SubElement(inventory_entry, "RATEDETAILS.LIST")
+            add_text(rate_details, "GSTRATEDUTYHEAD", duty_head)
+            add_text(rate_details, "GSTRATEVALUATIONTYPE", "Based on Value")
+            add_text(rate_details, "GSTRATE", f"{rate:.2f}")
+    add_item_party_ledger_entry(voucher, data, invoice_id)
+    for name, amount in tally_tax_ledgers(data):
+        if amount > 0:
+            tax_entry = add_item_tax_ledger_entry(voucher, name, amount)
+            add_tax_ledger_gst_details(tax_entry, name, data, item_mode=True)
+    if data.round_off:
+        add_item_tax_ledger_entry(voucher, "Round Off", abs(data.round_off), deemed_positive=data.round_off >= 0)
+    indent(envelope, space="  ")
+    return tostring(envelope, encoding="utf-8", xml_declaration=True)
+
+
+def build_voucher_envelope(invoice_id: int, data: InvoiceData, *, objview: str) -> tuple[Element, Element]:
+    """Create a standard purchase voucher envelope and return its voucher node."""
     envelope = Element("ENVELOPE")
     header = SubElement(envelope, "HEADER")
     add_text(header, "TALLYREQUEST", "Import Data")
@@ -26,40 +134,27 @@ def build_purchase_voucher_xml(invoice_id: int, data: InvoiceData) -> bytes:
         add_text(static, "SVCURRENTCOMPANY", TALLY_COMPANY)
     request_data = SubElement(import_data, "REQUESTDATA")
     tally_message = SubElement(request_data, "TALLYMESSAGE")
-    voucher = SubElement(tally_message, "VOUCHER", VCHTYPE="Purchase", ACTION="Create", OBJVIEW="Accounting Voucher View")
+    voucher = SubElement(tally_message, "VOUCHER", VCHTYPE=PURCHASE_VOUCHER_TYPE, ACTION="Create", OBJVIEW=objview)
     voucher_date = tally_date(data.date)
     add_date(voucher, "DATE", voucher_date)
     add_date(voucher, "EFFECTIVEDATE", voucher_date)
-    add_text(voucher, "VOUCHERTYPENAME", "Purchase")
-    add_text(voucher, "PERSISTEDVIEW", "Accounting Voucher View")
-    add_text(voucher, "VOUCHERNUMBER", data.invoice_number or f"Invoice-{invoice_id}")
-    add_text(voucher, "REFERENCE", data.invoice_number or f"Invoice-{invoice_id}")
+    add_text(voucher, "VOUCHERTYPENAME", PURCHASE_VOUCHER_TYPE)
+    add_text(voucher, "VOUCHERNUMBER", invoice_reference(data, invoice_id))
+    add_text(voucher, "REFERENCE", invoice_reference(data, invoice_id))
     add_date(voucher, "REFERENCEDATE", voucher_date)
-    add_text(voucher, "PARTYINVNO", data.invoice_number or f"Invoice-{invoice_id}")
+    add_text(voucher, "PARTYINVNO", invoice_reference(data, invoice_id))
     add_date(voucher, "PARTYINVDATE", voucher_date)
-    add_text(voucher, "PARTYLEDGERNAME", data.vendor_name or "Unknown Supplier")
+    add_text(voucher, "PARTYLEDGERNAME", vendor_display_name(data))
     if data.vendor_gstin:
         add_text(voucher, "PARTYGSTIN", data.vendor_gstin)
     add_text(voucher, "PLACEOFSUPPLY", data.place_of_supply or "")
-    if can_post_detailed_gst(data):
+    if objview != INVOICE_VOUCHER_VIEW and can_post_detailed_gst(data):
         add_text(voucher, "GSTREGISTRATIONTYPE", "Regular")
         add_text(voucher, "GSTSUPPLYTYPE", tally_supply_type(data))
         add_text(voucher, "ISGSTOVERRIDDEN", "Yes")
         add_text(voucher, "VCHGSTSTATUSISOVERRDN", "Yes")
-    add_text(voucher, "NARRATION", f"Purchase invoice {data.invoice_number or invoice_id} - {data.vendor_name or 'Unknown Supplier'}")
-    add_text(voucher, "ISINVOICE", "No")
-    add_ledger_entry(voucher, data.vendor_name or "Unknown Supplier", -abs(data.total_amount), deemed_positive=True)
-    purchase_entry = add_ledger_entry(voucher, PURCHASE_LEDGER_NAME, data.total_taxable_amount, deemed_positive=False)
-    if can_post_detailed_gst(data):
-        add_purchase_gst_details(purchase_entry, data, voucher_date)
-    for name, amount in tally_tax_ledgers(data):
-        if amount > 0:
-            tax_entry = add_ledger_entry(voucher, name, amount, deemed_positive=False)
-            add_tax_ledger_gst_details(tax_entry, name, data)
-    if data.round_off:
-        add_ledger_entry(voucher, "Round Off", data.round_off, deemed_positive=data.round_off < 0)
-    indent(envelope, space="  ")
-    return tostring(envelope, encoding="utf-8", xml_declaration=True)
+    add_text(voucher, "NARRATION", f"Purchase invoice {invoice_reference(data, invoice_id)} - {vendor_display_name(data)}")
+    return envelope, voucher
 
 
 def add_ledger_entry(voucher: Element, ledger_name: str, amount: float, *, deemed_positive: bool) -> Element:
@@ -69,6 +164,39 @@ def add_ledger_entry(voucher: Element, ledger_name: str, amount: float, *, deeme
     add_text(entry, "ISDEEMEDPOSITIVE", "Yes" if deemed_positive else "No")
     add_text(entry, "AMOUNT", f"{amount:.2f}")
     return entry
+
+
+def add_item_party_ledger_entry(voucher: Element, data: InvoiceData, invoice_id: int) -> Element:
+    """Append the party ledger entry Tally expects for an item invoice."""
+    entry = SubElement(voucher, "LEDGERENTRIES.LIST")
+    add_text(entry, "LEDGERNAME", vendor_display_name(data))
+    add_text(entry, "ISDEEMEDPOSITIVE", "No")
+    add_text(entry, "ISPARTYLEDGER", "Yes")
+    add_text(entry, "AMOUNT", f"{abs(data.total_amount):.2f}")
+    bill = SubElement(entry, "BILLALLOCATIONS.LIST")
+    add_text(bill, "NAME", invoice_reference(data, invoice_id))
+    add_text(bill, "BILLTYPE", "New Ref")
+    add_text(bill, "AMOUNT", f"{abs(data.total_amount):.2f}")
+    return entry
+
+
+def add_item_tax_ledger_entry(voucher: Element, ledger_name: str, amount: float, *, deemed_positive: bool = True) -> Element:
+    """Append a duty/round-off ledger line for an item invoice."""
+    entry = SubElement(voucher, "LEDGERENTRIES.LIST")
+    add_text(entry, "LEDGERNAME", ledger_name)
+    add_text(entry, "ISDEEMEDPOSITIVE", "Yes" if deemed_positive else "No")
+    add_text(entry, "AMOUNT", f"-{abs(amount):.2f}" if deemed_positive else f"{abs(amount):.2f}")
+    return entry
+
+
+def invoice_reference(data: InvoiceData, invoice_id: int) -> str:
+    """Return the invoice reference used across Tally voucher fields."""
+    return data.invoice_number or f"Invoice-{invoice_id}"
+
+
+def vendor_display_name(data: InvoiceData) -> str:
+    """Return the party ledger name used across Tally voucher fields."""
+    return data.vendor_name or "Unknown Supplier"
 
 
 def add_purchase_gst_details(entry: Element, data: InvoiceData, voucher_date: str) -> None:
@@ -111,7 +239,7 @@ def add_gst_value_details(entry: Element, data: InvoiceData) -> None:
         add_text(tax_details, "GSTOVRDNTAXAMOUNT", f"{amount:.2f}")
 
 
-def add_tax_ledger_gst_details(entry: Element, ledger_name: str, data: InvoiceData) -> None:
+def add_tax_ledger_gst_details(entry: Element, ledger_name: str, data: InvoiceData, *, item_mode: bool = False) -> None:
     """Mark tax ledger entries with their GST tax type."""
     if not can_post_detailed_gst(data):
         return
@@ -126,8 +254,11 @@ def add_tax_ledger_gst_details(entry: Element, ledger_name: str, data: InvoiceDa
     elif "cess" in lower:
         tax_type = "Cess"
     if tax_type:
-        add_text(entry, "GSTOVRDNTAXTYPE", tax_type)
-        add_text(entry, "GSTOVRDNASSESSABLEVALUE", f"{data.total_taxable_amount:.2f}")
+        if not item_mode:
+            add_text(entry, "GSTOVRDNTAXTYPE", tax_type)
+            add_text(entry, "GSTOVRDNASSESSABLEVALUE", f"{data.total_taxable_amount:.2f}")
+        else:
+            add_text(entry, "ADDLALLOCTYPE", "Appropriate by condition")
 
 
 def add_date(parent: Element, tag: str, value: str) -> Element:
@@ -207,3 +338,37 @@ def tally_date(value: str | None) -> str:
     """Format a date value for Tally XML."""
     dt = parse_date(value)
     return (dt or datetime.now()).strftime("%Y%m%d")
+
+
+def quantity_text(quantity: float, unit_name: str) -> str:
+    """Return a Tally quantity string."""
+    quantity_text_value = f"{quantity:.2f}"
+    if float(quantity).is_integer():
+        quantity_text_value = str(int(quantity))
+    return f"{quantity_text_value} {unit_name}".strip()
+
+
+def rate_text(rate: float, unit_name: str) -> str:
+    """Return a Tally rate string."""
+    return f"{rate:.2f}/{unit_name}" if unit_name else f"{rate:.2f}"
+
+
+def tally_unit_text(unit: str | None) -> str:
+    """Return a Tally-friendly display unit for inventory rows."""
+    normalized = normalize_unit_name(unit) or ""
+    return normalized.title() if normalized else ""
+
+
+def item_supply_type(item) -> str:
+    """Infer goods/services for one reviewed line item."""
+    hsn = (item.hsn_sac or "").strip()
+    return "Services" if hsn.startswith("99") else "Goods"
+
+
+def item_gst_rate_details(item, data: InvoiceData) -> list[tuple[str, float]]:
+    """Return GST rates for one inventory line, falling back to invoice-level rates."""
+    components = tax_components_for_item(item)
+    rates = [(duty_head_name(tax_type), values["rate"]) for tax_type, values in components.items() if values["rate"] > 0]
+    if rates:
+        return rates
+    return gst_rate_details(data)

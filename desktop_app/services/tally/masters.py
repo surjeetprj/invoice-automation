@@ -18,8 +18,22 @@ from ...config import (
     TALLY_COMPANY,
     TALLY_VENDOR_PARENT_LEDGER,
 )
-from ...domain.schemas import InvoiceData
+from ...domain.schemas import InvoiceData, LineItem
 from ...domain.parsing import parse_date
+
+VENDOR_LEDGER = "Vendor Ledger"
+PURCHASE_LEDGER = "Purchase Ledger"
+TAX_LEDGER = "Tax Ledger"
+ROUND_OFF_LEDGER = "Round Off Ledger"
+VOUCHER_TYPE = "Voucher Type"
+UNIT_MASTER = "Unit Master"
+STOCK_GROUP_MASTER = "Stock Group Master"
+STOCK_ITEM_MASTER = "Stock Item Master"
+
+DEFAULT_STOCK_GROUP = "Primary"
+PURCHASE_VOUCHER_TYPE = "Purchase"
+TALLY_ANY = "\u0004 Any"
+TALLY_NOT_APPLICABLE = "\u0004 Not Applicable"
 
 
 @dataclass(frozen=True)
@@ -37,6 +51,11 @@ class TallyMaster:
     contact: str | None = None
     applicable_from: str | None = None
     tax_type: str | None = None
+    unit_name: str | None = None
+    stock_group: str | None = None
+    hsn_sac: str | None = None
+    gst_rates: tuple[tuple[str, float], ...] = ()
+    supply_nature: str | None = None
     action: str = "Create"
 
     @property
@@ -49,15 +68,29 @@ class TallyMaster:
 
 def required_purchase_masters(data: InvoiceData) -> list[TallyMaster]:
     """Return masters needed for ledger-only purchase posting."""
-    vendor_name = data.vendor_name or "Unknown Supplier"
     masters = [
         vendor_master_from_invoice(data, action="Create"),
-        TallyMaster(PURCHASE_LEDGER_NAME, "Purchase Ledger", "Purchase Accounts"),
+        TallyMaster(PURCHASE_LEDGER_NAME, PURCHASE_LEDGER, "Purchase Accounts"),
         *tax_ledger_masters(action="Create"),
-        TallyMaster("Purchase", "Voucher Type", "Purchase"),
+        TallyMaster(PURCHASE_VOUCHER_TYPE, VOUCHER_TYPE, PURCHASE_VOUCHER_TYPE),
     ]
     if data.round_off:
-        masters.append(TallyMaster("Round Off", "Round Off Ledger", "Indirect Expenses"))
+        masters.append(TallyMaster("Round Off", ROUND_OFF_LEDGER, "Indirect Expenses"))
+    return dedupe_masters(masters)
+
+
+def required_inventory_purchase_masters(data: InvoiceData) -> list[TallyMaster]:
+    """Return masters needed for inventory-based purchase posting."""
+    masters = [*required_purchase_masters(data), stock_group_master(action="Create")]
+    stock_item_masters: list[TallyMaster] = []
+    for item in data.line_items:
+        unit_master = unit_master_from_line_item(item.unit, action="Create")
+        if unit_master:
+            masters.append(unit_master)
+        stock_item_masters.append(
+            stock_item_master_from_invoice_item(item, data, action="Create")
+        )
+    masters.extend(stock_item_masters)
     return dedupe_masters(masters)
 
 
@@ -66,7 +99,7 @@ def vendor_master_from_invoice(data: InvoiceData, *, action: str = "Alter") -> T
     vendor_name = data.vendor_name or "Unknown Supplier"
     return TallyMaster(
         vendor_name,
-        "Vendor Ledger",
+        VENDOR_LEDGER,
         TALLY_VENDOR_PARENT_LEDGER,
         data.vendor_gstin,
         address=data.vendor_address,
@@ -79,13 +112,50 @@ def vendor_master_from_invoice(data: InvoiceData, *, action: str = "Alter") -> T
     )
 
 
+def unit_master_from_line_item(unit: str | None, *, action: str = "Create") -> TallyMaster | None:
+    """Build a simple unit master from reviewed line-item text."""
+    normalized = normalize_unit_name(unit)
+    if not normalized:
+        return None
+    return TallyMaster(normalized, UNIT_MASTER, action=action)
+
+
+def stock_item_master_from_invoice_item(item: LineItem, data: InvoiceData, *, action: str = "Create") -> TallyMaster:
+    """Build a stock item master from one reviewed invoice line item."""
+    stock_name = normalize_stock_item_name(item.description)
+    unit_name = normalize_unit_name(item.unit)
+    return TallyMaster(
+        stock_name,
+        STOCK_ITEM_MASTER,
+        parent=DEFAULT_STOCK_GROUP,
+        unit_name=unit_name,
+        stock_group=DEFAULT_STOCK_GROUP,
+        hsn_sac=(item.hsn_sac or "").strip() or None,
+        gst_rates=stock_item_gst_rates(item, data),
+        supply_nature=stock_item_supply_nature(item),
+        applicable_from=fiscal_year_start(data.date),
+        action=action,
+    )
+
+
+def stock_group_master(name: str = DEFAULT_STOCK_GROUP, *, parent: str | None = None, action: str = "Create") -> TallyMaster:
+    """Build a stock group master used by item-wise posting."""
+    return TallyMaster(name, STOCK_GROUP_MASTER, parent=parent, stock_group=name, action=action)
+
+
 def build_master_import_xml(masters: Iterable[TallyMaster]) -> bytes:
     """Build one Tally import envelope for creating missing masters."""
     envelope, request_data = import_envelope("All Masters")
     for master in masters:
         message = SubElement(request_data, "TALLYMESSAGE")
-        if master.kind == "Voucher Type":
+        if master.kind == VOUCHER_TYPE:
             build_voucher_type(message, master)
+        elif master.kind == UNIT_MASTER:
+            build_unit(message, master)
+        elif master.kind == STOCK_GROUP_MASTER:
+            build_stock_group(message, master)
+        elif master.kind == STOCK_ITEM_MASTER:
+            build_stock_item(message, master)
         else:
             build_ledger(message, master)
     indent(envelope, space="  ")
@@ -100,19 +170,25 @@ def build_vendor_master_xml(data: InvoiceData, *, action: str = "Alter") -> byte
 def build_system_ledgers_xml(*, action: str = "Alter") -> bytes:
     """Build XML that creates or enriches purchase and GST tax ledgers."""
     masters = [
-        TallyMaster(PURCHASE_LEDGER_NAME, "Purchase Ledger", "Purchase Accounts", action=action),
+        TallyMaster(PURCHASE_LEDGER_NAME, PURCHASE_LEDGER, "Purchase Accounts", action=action),
         *tax_ledger_masters(action=action),
     ]
     return build_master_import_xml(masters)
 
 
+def build_inventory_stock_items_xml(data: InvoiceData, *, action: str = "Alter") -> bytes:
+    """Build XML that enriches stock items with GST and HSN details."""
+    masters = [stock_item_master_from_invoice_item(item, data, action=action) for item in data.line_items]
+    return build_master_import_xml(dedupe_masters(masters))
+
+
 def tax_ledger_masters(*, action: str = "Alter") -> list[TallyMaster]:
     """Return configured GST input tax ledger masters."""
     return [
-        TallyMaster(INPUT_CGST_LEDGER_NAME, "Tax Ledger", "Duties & Taxes", tax_type="CGST", action=action),
-        TallyMaster(INPUT_SGST_LEDGER_NAME, "Tax Ledger", "Duties & Taxes", tax_type="SGST", action=action),
-        TallyMaster(INPUT_IGST_LEDGER_NAME, "Tax Ledger", "Duties & Taxes", tax_type="IGST", action=action),
-        TallyMaster(INPUT_CESS_LEDGER_NAME, "Tax Ledger", "Duties & Taxes", tax_type="Cess", action=action),
+        TallyMaster(INPUT_CGST_LEDGER_NAME, TAX_LEDGER, "Duties & Taxes", tax_type="CGST", action=action),
+        TallyMaster(INPUT_SGST_LEDGER_NAME, TAX_LEDGER, "Duties & Taxes", tax_type="SGST", action=action),
+        TallyMaster(INPUT_IGST_LEDGER_NAME, TAX_LEDGER, "Duties & Taxes", tax_type="IGST", action=action),
+        TallyMaster(INPUT_CESS_LEDGER_NAME, TAX_LEDGER, "Duties & Taxes", tax_type="Cess", action=action),
     ]
 
 
@@ -159,7 +235,7 @@ def build_ledger(parent: Element, master: TallyMaster) -> Element:
     ledger = SubElement(parent, "LEDGER", NAME=master.name, ACTION=master.action)
     add_text(ledger, "NAME", master.name)
     add_text(ledger, "PARENT", master.parent or "Sundry Creditors")
-    if master.kind == "Vendor Ledger":
+    if master.kind == VENDOR_LEDGER:
         add_string_list(ledger, "MAILINGNAME.LIST", "MAILINGNAME", [master.name])
         add_string_list(ledger, "ADDRESS.LIST", "ADDRESS", address_lines(master.address))
         if master.state:
@@ -178,14 +254,55 @@ def build_ledger(parent: Element, master: TallyMaster) -> Element:
             add_text(ledger, "LEDGERPHONE", master.contact)
         add_vendor_mailing_details(ledger, master)
         add_vendor_gst_details(ledger, master)
-    elif master.kind == "Tax Ledger":
+    elif master.kind == TAX_LEDGER:
         add_tax_ledger_details(ledger, master)
-    add_text(ledger, "ISBILLWISEON", "Yes" if master.kind == "Vendor Ledger" else "No")
+    add_text(ledger, "ISBILLWISEON", "Yes" if master.kind == VENDOR_LEDGER else "No")
     if master.gstin:
         add_text(ledger, "GSTREGISTRATIONTYPE", "Regular")
         add_text(ledger, "PARTYGSTIN", master.gstin)
         add_text(ledger, "GSTIN", master.gstin)
     return ledger
+
+
+def build_unit(parent: Element, master: TallyMaster) -> Element:
+    """Append a Unit master XML node."""
+    unit = SubElement(parent, "UNIT", NAME=master.name, RESERVEDNAME="", ACTION=master.action)
+    add_text(unit, "NAME", master.name)
+    add_text(unit, "GSTREPUOM", gst_reporting_uqc(master.name))
+    add_text(unit, "ISGSTEXCLUDED", "No")
+    add_text(unit, "ISSIMPLEUNIT", "Yes")
+    add_text(unit, "DECIMALPLACES", "2")
+    reporting = SubElement(unit, "REPORTINGUQCDETAILS.LIST")
+    add_text(reporting, "APPLICABLEFROM", current_fiscal_year_start())
+    add_text(reporting, "REPORTINGUQCNAME", gst_reporting_uqc(master.name))
+    return unit
+
+
+def build_stock_item(parent: Element, master: TallyMaster) -> Element:
+    """Append a Stock Item master XML node."""
+    item = SubElement(parent, "STOCKITEM", NAME=master.name, ACTION=master.action)
+    add_text(item, "NAME", master.name)
+    add_text(item, "PARENT", master.stock_group or master.parent or DEFAULT_STOCK_GROUP)
+    if master.unit_name:
+        add_text(item, "BASEUNITS", master.unit_name)
+        add_text(item, "VATBASEUNIT", master.unit_name)
+    add_text(item, "GSTAPPLICABLE", "Applicable")
+    add_text(item, "GSTTYPEOFSUPPLY", master.supply_nature or "Goods")
+    if master.hsn_sac:
+        add_text(item, "HSNCODE", master.hsn_sac)
+        add_text(item, "GSTHSNNAME", master.hsn_sac)
+    add_stock_item_gst_details(item, master)
+    add_stock_item_hsn_details(item, master)
+    return item
+
+
+def build_stock_group(parent: Element, master: TallyMaster) -> Element:
+    """Append a Stock Group master XML node."""
+    group = SubElement(parent, "STOCKGROUP", NAME=master.name, ACTION=master.action)
+    add_text(group, "NAME", master.name)
+    if master.parent:
+        add_text(group, "PARENT", master.parent)
+    return group
 
 
 def add_tax_ledger_details(ledger: Element, master: TallyMaster) -> None:
@@ -237,11 +354,45 @@ def add_vendor_gst_details(ledger: Element, master: TallyMaster) -> None:
     add_text(details, "PARTYGSTIN", master.gstin)
 
 
+def add_stock_item_gst_details(item: Element, master: TallyMaster) -> None:
+    """Append GST/HSN details to a stock item master."""
+    details = SubElement(item, "GSTDETAILS.LIST")
+    add_text(details, "APPLICABLEFROM", master.applicable_from or today_tally_date())
+    add_text(details, "TAXABILITY", "Taxable")
+    add_text(details, "SRCOFGSTDETAILS", "Specify Details Here")
+    add_text(details, "GSTCALCSLABONMRP", "No")
+    add_text(details, "ISREVERSECHARGEAPPLICABLE", "No")
+    add_text(details, "ISNONGSTGOODS", "No")
+    add_text(details, "GSTINELIGIBLEITC", "No")
+    add_text(details, "INCLUDEEXPFORSLABCALC", "No")
+    statewise = SubElement(details, "STATEWISEDETAILS.LIST")
+    add_text(statewise, "STATENAME", TALLY_ANY)
+    for duty_head, rate in master.gst_rates:
+        rate_details = SubElement(statewise, "RATEDETAILS.LIST")
+        add_text(rate_details, "GSTRATEDUTYHEAD", duty_head)
+        add_text(rate_details, "GSTRATEVALUATIONTYPE", "Based on Value" if rate > 0 else TALLY_NOT_APPLICABLE)
+        if rate > 0:
+            add_text(rate_details, "GSTRATE", f"{rate:g}")
+    SubElement(details, "TEMPGSTITEMSLABRATES.LIST")
+    SubElement(details, "TEMPGSTDETAILSLABRATES.LIST")
+
+
+def add_stock_item_hsn_details(item: Element, master: TallyMaster) -> None:
+    """Append HSN/SAC details to a stock item master."""
+    if not master.hsn_sac:
+        return
+    details = SubElement(item, "HSNDETAILS.LIST")
+    add_text(details, "APPLICABLEFROM", master.applicable_from or today_tally_date())
+    add_text(details, "SRCOFHSNDETAILS", "Specify Details Here")
+    add_text(details, "HSNCODE", master.hsn_sac)
+    add_text(details, "DESCRIPTION", master.name)
+
+
 def build_voucher_type(parent: Element, master: TallyMaster) -> Element:
     """Append a Voucher Type master XML node."""
     voucher_type = SubElement(parent, "VOUCHERTYPE", NAME=master.name, ACTION="Create")
     add_text(voucher_type, "NAME", master.name)
-    add_text(voucher_type, "PARENT", master.parent or "Purchase")
+    add_text(voucher_type, "PARENT", master.parent or PURCHASE_VOUCHER_TYPE)
     add_text(voucher_type, "NUMBERINGMETHOD", "Automatic")
     return voucher_type
 
@@ -356,6 +507,37 @@ def tally_tax_type_label(tax_type: str) -> str:
     return tax_type
 
 
+def stock_item_gst_rates(item, data: InvoiceData) -> tuple[tuple[str, float], ...]:
+    """Return GST rate rows for one stock item, falling back to invoice-level rates."""
+    rates: dict[str, float] = {}
+    for tax in item.taxes:
+        tax_type = tax.tax_type.upper()
+        if tax_type in {"CGST", "SGST", "IGST", "CESS"} and tax.tax_rate > 0:
+            rates[tax_type] = max(rates.get(tax_type, 0.0), tax.tax_rate)
+    if not rates and data.total_taxable_amount > 0:
+        totals = {
+            "CGST": data.total_cgst,
+            "SGST": data.total_sgst,
+            "IGST": data.total_igst,
+            "CESS": data.total_cess,
+        }
+        for tax_type, amount in totals.items():
+            if amount > 0:
+                rates[tax_type] = round((amount / data.total_taxable_amount) * 100, 2)
+    ordered: list[tuple[str, float]] = []
+    for tax_type in ("CGST", "SGST", "IGST", "CESS"):
+        if tax_type in rates:
+            ordered.append((tally_tax_type_label(tax_type), rates[tax_type]))
+    ordered.append(("State Cess", 0.0))
+    return tuple(ordered)
+
+
+def stock_item_supply_nature(item) -> str:
+    """Infer whether one reviewed stock item is goods or services."""
+    hsn = (item.hsn_sac or "").strip()
+    return "Services" if hsn.startswith("99") else "Goods"
+
+
 def dedupe_masters(masters: Iterable[TallyMaster]) -> list[TallyMaster]:
     """De-duplicate masters by type/name while preserving order."""
     seen: set[tuple[str, str]] = set()
@@ -366,3 +548,60 @@ def dedupe_masters(masters: Iterable[TallyMaster]) -> list[TallyMaster]:
             seen.add(key)
             unique.append(master)
     return unique
+
+
+def normalize_unit_name(unit: str | None) -> str | None:
+    """Normalize a reviewed unit label for Tally master names."""
+    if not unit:
+        return None
+    cleaned = " ".join(unit.strip().upper().split())
+    return cleaned or None
+
+
+def gst_reporting_uqc(unit_name: str) -> str:
+    """Return a GST/UQC label for a Tally stock unit."""
+    normalized = normalize_unit_name(unit_name) or "NOS"
+    mapping = {
+        "KGS": "KGS-KILOGRAMS",
+        "KG": "KGS-KILOGRAMS",
+        "KILOGRAM": "KGS-KILOGRAMS",
+        "KILOGRAMS": "KGS-KILOGRAMS",
+        "LTR": "LTR-LITRES",
+        "LITRE": "LTR-LITRES",
+        "LITRES": "LTR-LITRES",
+        "LITER": "LTR-LITRES",
+        "LITERS": "LTR-LITRES",
+        "MTR": "MTR-METERS",
+        "METER": "MTR-METERS",
+        "METERS": "MTR-METERS",
+        "METRE": "MTR-METERS",
+        "METRES": "MTR-METERS",
+        "NOS": "NOS-NUMBERS",
+        "NO": "NOS-NUMBERS",
+        "NUMBER": "NOS-NUMBERS",
+        "NUMBERS": "NOS-NUMBERS",
+        "PCS": "PCS-PIECES",
+        "PC": "PCS-PIECES",
+        "PIECE": "PCS-PIECES",
+        "PIECES": "PCS-PIECES",
+        "PRS": "PRS-PAIRS",
+        "PAIR": "PRS-PAIRS",
+        "PAIRS": "PRS-PAIRS",
+        "DOZ": "DOZ-DOZENS",
+        "DOZEN": "DOZ-DOZENS",
+        "DOZENS": "DOZ-DOZENS",
+    }
+    return mapping.get(normalized, "OTH-OTHERS")
+
+
+def current_fiscal_year_start() -> str:
+    """Return the current Indian financial year start in Tally date format."""
+    now = datetime.now()
+    year = now.year if now.month >= 4 else now.year - 1
+    return datetime(year, 4, 1).strftime("%Y%m%d")
+
+
+def normalize_stock_item_name(description: str | None) -> str:
+    """Normalize a reviewed line description for stock item master names."""
+    cleaned = " ".join((description or "").strip().split())
+    return cleaned or "Unknown Item"

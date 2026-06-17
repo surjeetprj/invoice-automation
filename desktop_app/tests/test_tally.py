@@ -13,10 +13,17 @@ from desktop_app.db.models import AuditLog, Base, Invoice
 from desktop_app.db.repository import persist_extraction
 from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail, ValidationResult
 from desktop_app.services.tally import TallyClient
-from desktop_app.services.tally.client import TallyPreflight
-from desktop_app.services.tally.masters import TallyMaster, build_master_import_xml, build_system_ledgers_xml, required_purchase_masters
+from desktop_app.services.tally.client import TallyPreflight, annotate_tally_response, merge_tally_responses
+from desktop_app.services.tally.masters import (
+    build_inventory_stock_items_xml,
+    TallyMaster,
+    build_master_import_xml,
+    build_system_ledgers_xml,
+    required_inventory_purchase_masters,
+    required_purchase_masters,
+)
 from desktop_app.services.tally.responses import TallyResponse, parse_tally_response
-from desktop_app.services.tally.vouchers import build_purchase_voucher_xml
+from desktop_app.services.tally.vouchers import build_inventory_purchase_voucher_xml, build_purchase_voucher_xml
 from desktop_app.services.workflow import DesktopWorkflow
 
 
@@ -42,6 +49,7 @@ class TallyServiceTests(unittest.TestCase):
                     description="Consulting Service",
                     hsn_sac="9983",
                     quantity=1,
+                    unit="NOS",
                     rate=1000,
                     taxable_value=1000,
                     taxes=[
@@ -119,6 +127,67 @@ class TallyServiceTests(unittest.TestCase):
         self.assertIn("<GSTDUTYHEAD>CGST</GSTDUTYHEAD>", xml)
         self.assertIn("<ISINPUTCREDIT>Yes</ISINPUTCREDIT>", xml)
 
+    def test_inventory_master_xml_includes_unit_and_stock_item(self) -> None:
+        """Inventory posting should preflight reviewed units and stock items."""
+        masters = required_inventory_purchase_masters(self.sample_invoice_data())
+        xml = build_master_import_xml(masters).decode("utf-8")
+        self.assertIn('<STOCKGROUP NAME="Primary" ACTION="Create">', xml)
+        self.assertIn('<UNIT NAME="NOS" RESERVEDNAME="" ACTION="Create">', xml)
+        self.assertIn("<GSTREPUOM>NOS-NUMBERS</GSTREPUOM>", xml)
+        self.assertIn("<REPORTINGUQCNAME>NOS-NUMBERS</REPORTINGUQCNAME>", xml)
+        self.assertNotIn("<ORIGINALNAME>NOS</ORIGINALNAME>", xml)
+        self.assertIn("<ISSIMPLEUNIT>Yes</ISSIMPLEUNIT>", xml)
+        self.assertIn('<STOCKITEM NAME="Consulting Service" ACTION="Create">', xml)
+        self.assertIn("<PARENT>Primary</PARENT>", xml)
+        self.assertIn("<BASEUNITS>NOS</BASEUNITS>", xml)
+        self.assertIn("<VATBASEUNIT>NOS</VATBASEUNIT>", xml)
+        self.assertIn("<HSNCODE>9983</HSNCODE>", xml)
+        self.assertIn("<GSTHSNNAME>9983</GSTHSNNAME>", xml)
+        self.assertIn("<GSTTYPEOFSUPPLY>Services</GSTTYPEOFSUPPLY>", xml)
+        self.assertIn("<GSTDETAILS.LIST>", xml)
+        self.assertIn("<HSNDETAILS.LIST>", xml)
+        self.assertIn("<SRCOFHSNDETAILS>Specify Details Here</SRCOFHSNDETAILS>", xml)
+        self.assertIn("<DESCRIPTION>Consulting Service</DESCRIPTION>", xml)
+        self.assertIn("<SRCOFGSTDETAILS>Specify Details Here</SRCOFGSTDETAILS>", xml)
+        self.assertIn("<STATENAME>\x04 Any</STATENAME>", xml)
+        self.assertIn("<GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>", xml)
+        self.assertIn("<GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>", xml)
+        self.assertIn("<GSTRATE>9</GSTRATE>", xml)
+
+    def test_inventory_required_masters_include_stock_group_before_stock_items(self) -> None:
+        """Item posting should create the stock group before dependent stock items."""
+        masters = required_inventory_purchase_masters(self.sample_invoice_data())
+        labels = [master.label for master in masters]
+        self.assertIn("Stock Group Master: Primary", labels)
+        self.assertLess(labels.index("Stock Group Master: Primary"), labels.index("Stock Item Master: Consulting Service under Primary"))
+
+    def test_inventory_unit_xml_maps_pairs_to_prs_uqc(self) -> None:
+        """Pair-based reviewed units should emit a valid GST reporting UQC."""
+        data = self.sample_invoice_data().model_copy(
+            update={
+                "line_items": [
+                    self.sample_invoice_data().line_items[0].model_copy(update={"unit": "PRS"})
+                ]
+            }
+        )
+        xml = build_master_import_xml(required_inventory_purchase_masters(data)).decode("utf-8")
+        self.assertIn('<UNIT NAME="PRS" RESERVEDNAME="" ACTION="Create">', xml)
+        self.assertIn("<GSTREPUOM>PRS-PAIRS</GSTREPUOM>", xml)
+        self.assertIn("<REPORTINGUQCNAME>PRS-PAIRS</REPORTINGUQCNAME>", xml)
+        self.assertNotIn("<ORIGINALNAME>PRS</ORIGINALNAME>", xml)
+
+    def test_inventory_stock_item_sync_xml_alters_items_with_gst_details(self) -> None:
+        """Stock item sync should alter reviewed items with GST and HSN metadata."""
+        xml = build_inventory_stock_items_xml(self.sample_invoice_data()).decode("utf-8")
+        self.assertIn('<STOCKITEM NAME="Consulting Service" ACTION="Alter">', xml)
+        self.assertIn("<HSNCODE>9983</HSNCODE>", xml)
+        self.assertIn("<GSTHSNNAME>9983</GSTHSNNAME>", xml)
+        self.assertIn("<GSTDETAILS.LIST>", xml)
+        self.assertIn("<HSNDETAILS.LIST>", xml)
+        self.assertIn("<SRCOFHSNDETAILS>Specify Details Here</SRCOFHSNDETAILS>", xml)
+        self.assertIn("<SRCOFGSTDETAILS>Specify Details Here</SRCOFGSTDETAILS>", xml)
+        self.assertIn("<TEMPGSTITEMSLABRATES.LIST />", xml)
+
     def test_system_ledger_xml_alters_gst_tax_ledgers(self) -> None:
         """System ledger sync should enrich existing GST ledgers."""
         xml = build_system_ledgers_xml().decode("utf-8")
@@ -156,6 +225,30 @@ class TallyServiceTests(unittest.TestCase):
         self.assertIn("<GSTOVRDNTAXAMOUNT>90.00</GSTOVRDNTAXAMOUNT>", xml)
         self.assertNotIn("ALLINVENTORYENTRIES.LIST", xml)
 
+    def test_inventory_purchase_voucher_uses_inventory_entries(self) -> None:
+        """Item posting should emit an invoice-mode voucher with inventory rows."""
+        xml = build_inventory_purchase_voucher_xml(1, self.sample_invoice_data()).decode("utf-8")
+        self.assertIn('OBJVIEW="Invoice Voucher View"', xml)
+        self.assertIn("<PERSISTEDVIEW>Invoice Voucher View</PERSISTEDVIEW>", xml)
+        self.assertIn("<ISINVOICE>Yes</ISINVOICE>", xml)
+        self.assertIn("<VCHENTRYMODE>Item Invoice</VCHENTRYMODE>", xml)
+        self.assertIn("<ALLINVENTORYENTRIES.LIST>", xml)
+        self.assertIn("<STOCKITEMNAME>Consulting Service</STOCKITEMNAME>", xml)
+        self.assertIn("<GSTSOURCETYPE>Stock Item</GSTSOURCETYPE>", xml)
+        self.assertIn("<HSNSOURCETYPE>Stock Item</HSNSOURCETYPE>", xml)
+        self.assertIn("<ACTUALQTY>1 Nos</ACTUALQTY>", xml)
+        self.assertIn("<BILLEDQTY>1 Nos</BILLEDQTY>", xml)
+        self.assertIn("<RATE>1000.00/Nos</RATE>", xml)
+        self.assertIn("<AMOUNT>-1000.00</AMOUNT>", xml)
+        self.assertIn("<BATCHALLOCATIONS.LIST>", xml)
+        self.assertIn("<ACCOUNTINGALLOCATIONS.LIST>", xml)
+        self.assertIn("<LEDGERNAME>Purchase Account</LEDGERNAME>", xml)
+        self.assertIn("<HSNCODE>9983</HSNCODE>", xml)
+        self.assertIn("<LEDGERENTRIES.LIST>", xml)
+        self.assertIn("<LEDGERNAME>Input CGST</LEDGERNAME>", xml)
+        self.assertIn("<LEDGERNAME>Input SGST</LEDGERNAME>", xml)
+        self.assertIn("<ADDLALLOCTYPE>Appropriate by condition</ADDLALLOCTYPE>", xml)
+
     def test_direct_purchase_voucher_skips_gst_override_without_vendor_gstin(self) -> None:
         """Tally should receive accounting tax ledgers when party GSTIN is missing."""
         data = self.sample_invoice_data().model_copy(update={"vendor_gstin": None})
@@ -179,6 +272,77 @@ class TallyServiceTests(unittest.TestCase):
         names = parse_master_names(xml)
         self.assertIn("Vendor Pvt Ltd", names)
         self.assertIn("Purchase Account", names)
+
+    def test_inventory_master_creation_is_one_by_one_before_stock_items(self) -> None:
+        """Inventory prerequisites should be created one by one before dependent stock items."""
+        client = TallyClient()
+        masters = (
+            TallyMaster("Primary", "Stock Group Master"),
+            TallyMaster("PRS", "Unit Master"),
+            TallyMaster("Pair Item", "Stock Item Master", parent="Primary", unit_name="PRS"),
+        )
+        with patch.object(
+            client,
+            "create_missing_masters",
+            side_effect=[
+                TallyResponse(success=True, created=1),
+                TallyResponse(success=True, created=1),
+                TallyResponse(success=True, created=1),
+            ],
+        ) as create_missing:
+            response = client.create_missing_inventory_masters(masters)
+
+        self.assertTrue(response.success)
+        self.assertEqual(response.created, 3)
+        self.assertEqual(create_missing.call_count, 3)
+        batches = [call.args[0] for call in create_missing.call_args_list]
+        self.assertTrue(all(len(batch) == 1 for batch in batches))
+        self.assertEqual(batches[0][0].kind, "Stock Group Master")
+        self.assertEqual(batches[1][0].kind, "Unit Master")
+        self.assertEqual(batches[2][0].kind, "Stock Item Master")
+
+    def test_merge_tally_responses_accumulates_counts_and_messages(self) -> None:
+        """Staged inventory imports should surface a single combined result."""
+        merged = merge_tally_responses(
+            [
+                TallyResponse(success=True, created=1),
+                TallyResponse(success=False, exceptions=1, messages=("Unit 'PRS' does not exist!",)),
+            ]
+        )
+        self.assertFalse(merged.success)
+        self.assertEqual(merged.created, 1)
+        self.assertEqual(merged.exceptions, 1)
+        self.assertIn("Unit 'PRS' does not exist!", merged.messages)
+
+    def test_inventory_master_creation_failure_names_exact_master(self) -> None:
+        """Inventory master failures should identify the exact failing master."""
+        client = TallyClient()
+        masters = (
+            TallyMaster("Primary", "Stock Group Master"),
+            TallyMaster("PRS", "Unit Master"),
+        )
+        with patch.object(
+            client,
+            "create_missing_masters",
+            side_effect=[
+                TallyResponse(success=True, created=1),
+                TallyResponse(success=False, exceptions=1, messages=("DUPLICATE ORIGINAL NAME",)),
+            ],
+        ):
+            response = client.create_missing_inventory_masters(masters)
+
+        self.assertFalse(response.success)
+        self.assertIn("Unit Master: PRS -> DUPLICATE ORIGINAL NAME", response.messages)
+
+    def test_annotate_tally_response_adds_master_context(self) -> None:
+        """Master context should be preserved on both success and failure responses."""
+        failure = annotate_tally_response(
+            TallyResponse(success=False, exceptions=1, messages=("DUPLICATE ORIGINAL NAME",)),
+            "Unit Master: PRS",
+        )
+        success = annotate_tally_response(TallyResponse(success=True, created=1), "Unit Master: PRS")
+        self.assertEqual(failure.messages, ("Unit Master: PRS -> DUPLICATE ORIGINAL NAME",))
+        self.assertEqual(success.messages, ())
 
     def test_workflow_posts_approved_invoice_and_marks_posted(self) -> None:
         """Successful Tally posting should mark the invoice Posted and audit it."""
@@ -205,6 +369,31 @@ class TallyServiceTests(unittest.TestCase):
             logs = db.scalars(select(AuditLog).where(AuditLog.invoice_id == invoice_id)).all()
             self.assertTrue(any("Pushed to TallyPrime" in log.action for log in logs))
 
+    def test_workflow_posts_itemwise_invoice_and_marks_posted(self) -> None:
+        """Successful inventory Tally posting should mark the invoice Posted and audit it."""
+        engine = self.make_engine()
+        invoice_id = self.create_invoice(engine)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            with patch("desktop_app.services.workflow.TallyClient") as client_cls:
+                client = client_cls.return_value
+                client.preflight_inventory_purchase_invoice.return_value = TallyPreflight((), ())
+                client.sync_vendor_master.return_value = TallyResponse(success=True, altered=1)
+                client.sync_system_ledgers.return_value = TallyResponse(success=True, altered=4)
+                client.sync_inventory_item_masters.return_value = TallyResponse(success=True, altered=1)
+                client.post_inventory_purchase_voucher.return_value = TallyResponse(success=True, created=1)
+                result = workflow.post_invoice_items_to_tally(invoice_id)
+
+        self.assertTrue(result["success"])
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = db.get(Invoice, invoice_id)
+            self.assertIsNotNone(invoice)
+            assert invoice is not None
+            self.assertEqual(invoice.status, InvoiceStatus.POSTED)
+            logs = db.scalars(select(AuditLog).where(AuditLog.invoice_id == invoice_id)).all()
+            self.assertTrue(any("item-wise to TallyPrime" in log.action for log in logs))
+
     def test_workflow_requires_confirmation_for_missing_masters(self) -> None:
         """Missing masters should be reported before creating them."""
         engine = self.make_engine()
@@ -224,6 +413,29 @@ class TallyServiceTests(unittest.TestCase):
         self.assertIn("Vendor Ledger: Vendor Pvt Ltd under Sundry Creditors", result["missing_masters"])
         client.create_missing_masters.assert_not_called()
         client.post_purchase_voucher.assert_not_called()
+
+    def test_workflow_requires_confirmation_for_missing_inventory_masters(self) -> None:
+        """Missing units or stock items should be reported before item posting."""
+        engine = self.make_engine()
+        invoice_id = self.create_invoice(engine)
+        missing = (
+            TallyMaster("NOS", "Unit Master"),
+            TallyMaster("Consulting Service", "Stock Item Master", parent="Primary", unit_name="NOS"),
+        )
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            with patch("desktop_app.services.workflow.TallyClient") as client_cls:
+                client = client_cls.return_value
+                client.preflight_inventory_purchase_invoice.return_value = TallyPreflight(missing, missing)
+                result = workflow.post_invoice_items_to_tally(invoice_id, create_missing_masters=False)
+
+        self.assertFalse(result["success"])
+        self.assertTrue(result["requires_confirmation"])
+        self.assertIn("Unit Master: NOS", result["missing_masters"])
+        self.assertIn("Stock Item Master: Consulting Service under Primary", result["missing_masters"])
+        client.create_missing_inventory_masters.assert_not_called()
+        client.post_inventory_purchase_voucher.assert_not_called()
 
     def test_workflow_creates_confirmed_masters_before_posting(self) -> None:
         """Confirmed missing masters should be created before voucher posting."""
@@ -248,6 +460,32 @@ class TallyServiceTests(unittest.TestCase):
         client.sync_vendor_master.assert_called_once()
         client.sync_system_ledgers.assert_called_once()
         client.post_purchase_voucher.assert_called_once()
+
+    def test_workflow_creates_confirmed_inventory_masters_before_item_posting(self) -> None:
+        """Confirmed missing units and stock items should be created before item posting."""
+        engine = self.make_engine()
+        invoice_id = self.create_invoice(engine)
+        missing = (
+            TallyMaster("NOS", "Unit Master"),
+            TallyMaster("Consulting Service", "Stock Item Master", parent="Primary", unit_name="NOS"),
+        )
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            with patch("desktop_app.services.workflow.TallyClient") as client_cls:
+                client = client_cls.return_value
+                client.preflight_inventory_purchase_invoice.return_value = TallyPreflight(missing, missing)
+                client.create_missing_inventory_masters.return_value = TallyResponse(success=True, created=2)
+                client.sync_vendor_master.return_value = TallyResponse(success=True, altered=1)
+                client.sync_system_ledgers.return_value = TallyResponse(success=True, altered=4)
+                client.sync_inventory_item_masters.return_value = TallyResponse(success=True, altered=1)
+                client.post_inventory_purchase_voucher.return_value = TallyResponse(success=True, created=1)
+                result = workflow.post_invoice_items_to_tally(invoice_id, create_missing_masters=True)
+
+        self.assertTrue(result["success"])
+        client.create_missing_inventory_masters.assert_called_once_with(missing)
+        client.sync_inventory_item_masters.assert_called_once()
+        client.post_inventory_purchase_voucher.assert_called_once()
 
     def test_workflow_syncs_vendor_master_without_posting_voucher(self) -> None:
         """Vendor master sync should update Tally without creating a voucher."""
@@ -305,6 +543,70 @@ class TallyServiceTests(unittest.TestCase):
             self.assertIsNotNone(invoice)
             assert invoice is not None
             self.assertEqual(invoice.status, InvoiceStatus.APPROVED)
+
+    def test_workflow_inventory_tally_failure_keeps_invoice_approved(self) -> None:
+        """Failed inventory voucher posting must not mark the invoice Posted."""
+        engine = self.make_engine()
+        invoice_id = self.create_invoice(engine)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            with patch("desktop_app.services.workflow.TallyClient") as client_cls:
+                client = client_cls.return_value
+                client.preflight_inventory_purchase_invoice.return_value = TallyPreflight((), ())
+                client.sync_vendor_master.return_value = TallyResponse(success=True, altered=1)
+                client.sync_system_ledgers.return_value = TallyResponse(success=True, altered=4)
+                client.sync_inventory_item_masters.return_value = TallyResponse(success=True, altered=1)
+                client.post_inventory_purchase_voucher.return_value = TallyResponse(success=False, exceptions=1, messages=("Item error",))
+                with self.assertRaises(ValueError):
+                    workflow.post_invoice_items_to_tally(invoice_id)
+
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = db.get(Invoice, invoice_id)
+            self.assertIsNotNone(invoice)
+            assert invoice is not None
+            self.assertEqual(invoice.status, InvoiceStatus.APPROVED)
+
+    def test_workflow_inventory_posting_rejects_incomplete_line_items_before_tally(self) -> None:
+        """Item posting should fail fast when reviewed line data is incomplete."""
+        engine = self.make_engine()
+        invoice_id = self.create_invoice(engine)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = db.get(Invoice, invoice_id)
+            assert invoice is not None
+            persist_extraction(
+                db,
+                invoice,
+                self.sample_invoice_data().model_copy(
+                    update={
+                        "line_items": [
+                            LineItem(
+                                description="Broken item",
+                                quantity=0.0,
+                                unit="",
+                                rate=0.0,
+                                taxable_value=0.0,
+                                taxes=[],
+                            )
+                        ]
+                    }
+                ),
+                ValidationResult(is_valid=True),
+                "raw text",
+            )
+            db.commit()
+
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            with patch("desktop_app.services.workflow.TallyClient") as client_cls:
+                client = client_cls.return_value
+                client.preflight_inventory_purchase_invoice.side_effect = ValueError(
+                    "Item posting requires complete reviewed line items.\nLine 1: quantity must be greater than 0"
+                )
+                with self.assertRaises(ValueError):
+                    workflow.post_invoice_items_to_tally(invoice_id)
+                client.post_inventory_purchase_voucher.assert_not_called()
 
     def test_workflow_rejects_unapproved_invoice_for_tally_posting(self) -> None:
         """Only approved or already posted invoices can be posted to Tally."""
