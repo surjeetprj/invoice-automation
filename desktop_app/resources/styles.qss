@@ -8,9 +8,9 @@ QMainWindow {
     background: #f6f8fb;
 }
 
-#sidebar {
+#topBar {
     background: #ffffff;
-    border-right: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
 }
 
 #appTitle,
@@ -85,8 +85,8 @@ QPushButton:disabled {
 }
 
 #navButton {
-    text-align: left;
-    padding-left: 12px;
+    text-align: center;
+    padding: 7px 14px;
 }
 
 #navButton[active="true"] {
