@@ -63,6 +63,32 @@ On first startup after an app update, Invoice AI upgrades an existing local
 backfilled into the normalized invoice tables while invoice summaries, review
 state, and audit logs are preserved. No manual runtime data cleanup is required.
 
+## Review And Export
+
+The invoice detail screen uses the Metadata tab as the main reviewer workspace.
+Voucher details, party details, line items, shipping and transport, bank fields,
+and tax totals are grouped together so missing export-critical data can be
+checked against the document preview quickly. Required markers are informational
+in this version; they highlight likely export problems but do not block approval
+by themselves.
+
+The Export Data menu supports file-based exports and direct TallyPrime posting:
+
+- `CSV`, `JSON`, `Tally XML`, and `ERPNext` create downloadable export files.
+- `Post Purchase Voucher to TallyPrime` posts a ledger-only accounting Purchase
+  voucher to the local TallyPrime HTTP server.
+- `Post Item-wise Purchase Voucher to TallyPrime` posts an inventory Purchase
+  voucher using reviewed line items.
+- `Sync Vendor Ledger to TallyPrime` syncs the party ledger master.
+- `Sync Purchase and GST Ledgers to TallyPrime` syncs configured purchase and
+  input tax ledgers.
+
+Direct TallyPrime posting requires TallyPrime to be running locally with the
+target company open and HTTP enabled, usually at `http://localhost:9000`.
+Missing masters are created only after reviewer confirmation. Item-wise posting
+can create required units, stock groups, and stock items, and it blocks before
+posting when reviewed item data is incomplete.
+
 ## Developer Context
 
 For architecture and safe-codebase context, see:

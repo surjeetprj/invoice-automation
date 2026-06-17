@@ -21,12 +21,25 @@
 - GST rates must remain visible, editable, preserved through corrections, and
   available for export.
 - Exports represent purchase vouchers, not sales invoices.
+- The Metadata tab is the primary reviewer workspace. Line items belong inside
+  Metadata, alongside voucher, party, shipping, bank, and tax-total groups, so
+  missing export-critical values are visible before posting to an ERP.
+- Required field markers in the review UI are informational in this version;
+  they surface export risk but do not block approval by themselves.
 - Direct TallyPrime posting belongs in `services/tally`; downloadable CSV,
   JSON, Tally XML, and ERPNext exports remain in `services/exports`.
 - Direct TallyPrime posting uses controlled master creation after reviewer
   confirmation, not blind auto-creation.
-- TallyPrime v1 posting is ledger-only. Stock items and units are not created
-  from OCR text.
+- TallyPrime direct posting has two explicit modes: ledger-only accounting
+  Purchase vouchers and item-wise inventory Purchase vouchers.
+- Ledger-only posting remains available as the stable fallback when reviewed
+  item data is incomplete or inventory posting is not desired.
+- Item-wise TallyPrime posting may create stock groups, units, and stock item
+  masters after reviewer confirmation. V1 uses reviewed line-item descriptions
+  as stock item names and reviewed unit text after simple cleanup.
+- Item-wise posting must block before sending a voucher to TallyPrime when
+  required item fields are incomplete; it must not silently downgrade to
+  ledger-only posting.
 - A successful direct TallyPrime post changes invoice status to `Posted`; a
   failed post leaves the existing invoice status unchanged.
 - Vendor, purchase, and GST ledger masters may be synced to TallyPrime, but

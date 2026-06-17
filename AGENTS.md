@@ -28,8 +28,15 @@ Working rules:
 - Keep direct TallyPrime HTTP/XML posting services in
   `desktop_app/services/tally`; file-based downloadable exports remain in
   `desktop_app/services/exports`.
+- Keep TallyPrime ledger-only and item-wise purchase posting behavior explicit
+  in workflow and UI labels. Ledger-only posting creates accounting purchase
+  vouchers; item-wise posting creates inventory purchase vouchers with stock
+  item and unit masters only after reviewer confirmation.
 - Keep database models, repository helpers, and migrations in `desktop_app/db`.
 - Keep Pydantic schemas, parsing helpers, and validation in `desktop_app/domain`.
+- Keep review UI changes focused on surfacing missing export-essential fields
+  early, especially voucher details, party details, line items, tax totals, and
+  Tally/ERP master mapping inputs.
 - Improve AI extraction through Pydantic field descriptions, prompts, configurable
   model choice, normalization, and validation before adding ad hoc post-LLM
   enrichment modules.

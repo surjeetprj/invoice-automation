@@ -2,7 +2,10 @@
 
 Invoice AI Desktop is a monolithic PySide6 app. The UI calls
 `DesktopWorkflow`, which is the main facade for upload, processing, review,
-audit logs, exports, and direct TallyPrime posting.
+audit logs, exports, and direct TallyPrime posting. The invoice detail page is
+designed as a compact reviewer workspace: Metadata contains grouped voucher,
+party, line-item, shipping, bank, and tax-total sections so export-critical
+fields can be checked against the document preview without moving between tabs.
 
 ## Processing Flow
 
@@ -41,7 +44,8 @@ export.
 - `services/exports/exporters.py`: CSV, JSON, downloadable Tally XML, and
   ERPNext purchase exports.
 - `services/tally/`: local TallyPrime HTTP/XML client, controlled master XML,
-  ledger-only purchase voucher XML, and response parsing for direct posting.
+  ledger-only and item-wise purchase voucher XML, inventory master XML, and
+  response parsing for direct posting.
 - `ui/`: PySide6 pages and widgets.
 
 ## Persistence
@@ -64,21 +68,32 @@ Downloadable exports stay in `services/exports`. Direct posting to a locally
 running TallyPrime instance is handled by `services/tally` and orchestrated by
 `DesktopWorkflow`.
 
-Direct TallyPrime posting follows a controlled flow:
+Direct TallyPrime posting has two explicit modes:
+
+- `Post Purchase Voucher to TallyPrime`: posts a ledger-only accounting
+  Purchase voucher. This is the stable fallback when inventory item data is not
+  reviewed enough for stock posting.
+- `Post Item-wise Purchase Voucher to TallyPrime`: posts an inventory Purchase
+  voucher with `ALLINVENTORYENTRIES.LIST` rows from reviewed line items.
+
+Both modes follow a controlled flow:
 
 - Check the local TallyPrime HTTP endpoint and active company.
 - Preflight required masters for the approved invoice.
 - Ask the reviewer before creating missing masters.
 - Create or sync the vendor ledger, purchase ledger, GST ledgers, and purchase
   voucher type where allowed.
-- Post a ledger-only purchase voucher.
+- For item-wise posting, create or sync required stock groups, units, and stock
+  items where allowed. V1 uses reviewed line-item descriptions as stock item
+  names and reviewed units after simple cleanup.
 - Mark the invoice as `Posted` only after Tally accepts the voucher.
 
-Master creation is intentionally limited. Vendor ledgers are created under
-`Sundry Creditors`, purchase ledgers under `Purchase Accounts`, and input tax
-ledgers under `Duties & Taxes`. Stock items and units are not created in this
-version because OCR item text is not reliable enough to prevent duplicate or
-incorrect inventory masters.
+Master creation is intentionally controlled. Vendor ledgers are created under
+`Sundry Creditors`, purchase ledgers under `Purchase Accounts`, input tax
+ledgers under `Duties & Taxes`, stock items under `Primary`, and units as simple
+units. Item-wise posting is blocked before any Tally voucher request when
+required line-item fields are missing or invalid, rather than silently
+downgrading to ledger-only posting.
 
 For scanned/image invoices, reliable invoice totals are preferred over
 unreliable visual line-item detail. If visual line rows do not reconcile with
