@@ -3,10 +3,12 @@ from __future__ import annotations
 """PDF text and table extraction helpers for desktop processing."""
 
 import logging
+import time
 from pathlib import Path
 
 import pdfplumber
 
+from ...config import PDF_TABLE_EXTRACTION_ENABLED
 from .document_source import DocumentKind, classify_pdf as classify_pdf_kind, validate_upload_file
 
 logger = logging.getLogger(__name__)
@@ -38,17 +40,27 @@ def validate_file(path: Path) -> None:
         raise ScannedDocumentException("Scanned or image-only PDF detected. Use the multimodal parser route.")
 
 
-def extract_invoice_text(file_path: str | Path) -> str:
+def extract_invoice_text(file_path: str | Path, validate: bool = True) -> str:
     """Extract layout-preserved PDF text plus detected Markdown tables."""
     path = Path(file_path)
-    validate_file(path)
+    if validate:
+        validate_file(path)
     parts: list[str] = []
     with pdfplumber.open(path) as pdf:
         page_count = len(pdf.pages)
         if page_count == 0:
             raise ValueError("The PDF does not contain any pages.")
         for page_number, page in enumerate(pdf.pages, start=1):
+            page_start = time.perf_counter()
             page_text, page_tables = extract_page_content(page, page_number)
+            elapsed_ms = int((time.perf_counter() - page_start) * 1000)
+            logger.info(
+                "PDF page %s extraction finished in %sms: %d chars, %d tables",
+                page_number,
+                elapsed_ms,
+                len(page_text),
+                len(page_tables),
+            )
             parts.append(page_text)
             if page_tables:
                 parts.append(f"\n\n## Extracted Tables - Page {page_number}\n")
@@ -63,6 +75,9 @@ def extract_page_content(page, page_number: int) -> tuple[str, list[str]]:
     """Return layout text plus markdown tables for one pdfplumber page."""
     page_text = page.extract_text(layout=True) or ""
     table_markdown: list[str] = []
+    if not should_extract_tables():
+        logger.info("PDF table extraction skipped on page %s", page_number)
+        return page_text, table_markdown
     try:
         tables = page.extract_tables(table_settings=TABLE_SETTINGS) or []
     except Exception as exc:
@@ -74,6 +89,11 @@ def extract_page_content(page, page_number: int) -> tuple[str, list[str]]:
         if markdown:
             table_markdown.append(markdown)
     return page_text, table_markdown
+
+
+def should_extract_tables() -> bool:
+    """Return True when the optional pdfplumber table pass is enabled."""
+    return PDF_TABLE_EXTRACTION_ENABLED
 
 
 def table_to_markdown(table: list[list[str | None]], title: str | None = None) -> str:

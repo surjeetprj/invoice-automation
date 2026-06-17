@@ -33,7 +33,8 @@ from ..domain.schemas import (
 from .documents.document_source import DocumentKind, classify_document, validate_upload_file
 from .documents.extraction import ScannedDocumentException
 from .exports.exporters import export_invoice_csv, export_invoice_json, export_invoice_tally, export_to_erpnext
-from .parsing.ai_parser import parse_invoice_source
+from .parsing.ai_client import AIRateLimitError
+from .parsing.ai_parser import extract_invoice_source_text, parse_invoice, parse_invoice_file
 from .tally import TallyClient
 from ..domain.validation import calculate_confidence_score, validate_invoice
 
@@ -434,19 +435,43 @@ class DesktopWorkflow:
         source = classify_document(file_path)
         self.log(db, invoice.id, f"Document classified as {source.document_kind.value}", reason=source.mime_type)
 
+        raw_markdown = None
         try:
-            parsed_result = parse_invoice_source(source, vendor_hint=invoice.filename)
-            raw_markdown = parsed_result.source_text
             if source.document_kind == DocumentKind.DIGITAL_PDF:
-                logger.info("PDF extraction finished for invoice #%s: %d chars", invoice.id, len(raw_markdown or ""))
-                self.log(db, invoice.id, f"PDF extraction complete - {len(raw_markdown or '')} chars")
+                extraction_start = time.perf_counter()
+                raw_markdown = extract_invoice_source_text(source)
+                extraction_time_ms = int((time.perf_counter() - extraction_start) * 1000)
+                logger.info(
+                    "PDF extraction finished for invoice #%s in %sms: %d chars",
+                    invoice.id,
+                    extraction_time_ms,
+                    len(raw_markdown or ""),
+                )
+                self.log(db, invoice.id, f"PDF extraction complete in {extraction_time_ms}ms - {len(raw_markdown or '')} chars")
+                logger.info("AI parsing started for invoice #%s", invoice.id)
+                ai_start = time.perf_counter()
+                parsed = parse_invoice(raw_markdown, vendor_hint=invoice.filename)
             else:
                 logger.info("Visual parsing route selected for invoice #%s: %s", invoice.id, source.document_kind.value)
                 self.log(db, invoice.id, f"Visual AI parsing route used - {source.document_kind.value}")
-            parsed = parsed_result.data
-            logger.info("AI parsing finished for invoice #%s", invoice.id)
+                raw_markdown = None
+                logger.info("AI parsing started for invoice #%s", invoice.id)
+                ai_start = time.perf_counter()
+                parsed = parse_invoice_file(source.path, source.mime_type, invoice.filename, document_kind=source.document_kind.value)
+            ai_time_ms = int((time.perf_counter() - ai_start) * 1000)
+            logger.info("AI parsing finished for invoice #%s in %sms", invoice.id, ai_time_ms)
             data = InvoiceData(**parsed)
             validation = validate_invoice(data, raw_markdown)
+        except AIRateLimitError as exc:
+            logger.warning("AI quota/rate limit for invoice #%s: %s", invoice.id, exc)
+            data = InvoiceData(vendor_name=invoice.filename)
+            validation = ValidationResult(
+                is_valid=False,
+                errors=[str(exc)],
+                warnings=[],
+                issues=[{"severity": "error", "message": str(exc), "field": "AI Quota"}],
+            )
+            self.log(db, invoice.id, f"AI quota/rate limit: {exc}")
         except Exception as exc:
             logger.exception("AI parsing failed for invoice #%s", invoice.id)
             data = InvoiceData(vendor_name=invoice.filename)
@@ -457,8 +482,6 @@ class DesktopWorkflow:
                 issues=[{"severity": "error", "message": str(exc), "field": "AI Parser"}],
             )
             self.log(db, invoice.id, f"AI parsing failed: {exc}")
-            raw_markdown = None
-            parsed_result = None
         confidence = calculate_confidence_score(data, validation)
         data.confidence_score = confidence
 

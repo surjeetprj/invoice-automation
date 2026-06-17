@@ -31,7 +31,7 @@ def parse_invoice_file(
 def parse_invoice_source(source: InvoiceSource, vendor_hint: str | None = None) -> ParsedInvoiceResult:
     """Parse a classified invoice source through the correct AI path."""
     if source.document_kind == DocumentKind.DIGITAL_PDF:
-        raw_markdown = extract_invoice_text(source.path) or source.text_context
+        raw_markdown = extract_invoice_source_text(source)
         data = parse_invoice(raw_markdown, vendor_hint)
         return ParsedInvoiceResult(
             data=data,
@@ -47,6 +47,11 @@ def parse_invoice_source(source: InvoiceSource, vendor_hint: str | None = None) 
         document_kind=source.document_kind.value,
         mime_type=source.mime_type,
     )
+
+
+def extract_invoice_source_text(source: InvoiceSource) -> str:
+    """Extract text context for a digital PDF source without reclassifying it."""
+    return extract_invoice_text(source.path, validate=False) or source.text_context or ""
 
 
 def empty_invoice(vendor_hint: str | None = None) -> dict[str, Any]:

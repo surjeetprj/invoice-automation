@@ -13,9 +13,9 @@ from desktop_app.config import DEFAULT_GEMINI_MODEL
 from desktop_app.domain.parsing import parse_date, parse_decimal
 from desktop_app.domain.schemas import InvoiceData, LineItem, SupplyType, TaxDetail
 from desktop_app.services.documents.document_source import DocumentKind, InvoiceSource, classify_document, mime_type_for_path, validate_upload_file
-from desktop_app.services.documents.extraction import extract_page_content, table_to_markdown
+from desktop_app.services.documents.extraction import extract_page_content, should_extract_tables, table_to_markdown
 from desktop_app.services.parsing.ai_prompts import SYSTEM_PROMPT, VISUAL_SYSTEM_PROMPT
-from desktop_app.services.parsing.ai_parser import normalize_extracted_data, parse_invoice_source, to_float
+from desktop_app.services.parsing.ai_parser import extract_invoice_source_text, normalize_extracted_data, parse_invoice_source, to_float
 from desktop_app.ui.widgets.line_items_table import build_line_item_taxes, cast_line_field, flatten_line_item_taxes
 from desktop_app.ui.widgets.pdf_preview import render_document_to_images
 from desktop_app.domain.validation import validate_gstin, validate_invoice, validate_supply_type
@@ -117,10 +117,20 @@ class DomainHelperTests(unittest.TestCase):
             def extract_tables(self, table_settings):
                 return [[["Item", "Amount"], ["Service", "100"]]]
 
-        page_text, tables = extract_page_content(FakePage(), 1)
+        with (
+            patch("desktop_app.services.documents.extraction.PDF_TABLE_EXTRACTION_ENABLED", True),
+        ):
+            page_text, tables = extract_page_content(FakePage(), 1)
         self.assertEqual(page_text, "Invoice text")
         self.assertEqual(len(tables), 1)
         self.assertIn("| Service | 100 |", tables[0])
+
+    def test_table_extraction_can_be_disabled(self) -> None:
+        """Table extraction should be controlled by a simple on/off setting."""
+        with (
+            patch("desktop_app.services.documents.extraction.PDF_TABLE_EXTRACTION_ENABLED", False),
+        ):
+            self.assertFalse(should_extract_tables())
 
     def test_document_classifier_routes_images_without_pdf_extraction(self) -> None:
         """Supported image uploads should be routed as visual invoices."""
@@ -166,11 +176,20 @@ class DomainHelperTests(unittest.TestCase):
         ):
             result = parse_invoice_source(source, vendor_hint="invoice.pdf")
 
-        extract.assert_called_once_with(source.path)
+        extract.assert_called_once_with(source.path, validate=False)
         parse.assert_called_once()
         self.assertEqual(result.source_text, "raw text")
         self.assertEqual(result.document_kind, "DIGITAL_PDF")
         self.assertEqual(result.data["invoice_number"], "INV-1")
+
+    def test_digital_pdf_text_extraction_helper_skips_reclassification(self) -> None:
+        """Workflow can time text extraction separately without reclassifying the PDF."""
+        source = InvoiceSource(path=Path("invoice.pdf"), document_kind=DocumentKind.DIGITAL_PDF, mime_type="application/pdf")
+        with patch("desktop_app.services.parsing.ai_parser.extract_invoice_text", return_value="raw text") as extract:
+            text = extract_invoice_source_text(source)
+
+        extract.assert_called_once_with(source.path, validate=False)
+        self.assertEqual(text, "raw text")
 
     def test_parser_source_routes_images_to_visual_parser(self) -> None:
         """Images should skip local text extraction and call the visual parser."""
@@ -266,7 +285,42 @@ class DomainHelperTests(unittest.TestCase):
             model="test-text-model",
             google_api_key="test-key",
             temperature=0.0,
+            retries=0,
         )
+
+    def test_text_ai_client_raises_clean_rate_limit_error(self) -> None:
+        """Gemini quota errors should become concise application exceptions."""
+        from desktop_app.services.parsing.ai_client import AIRateLimitError, invoke_invoice_parser
+
+        class FakeStructuredLLM:
+            def invoke(self, messages):
+                raise RuntimeError("429 quota exceeded. Please retry in 36.5s.")
+
+        fake_llm = Mock()
+        fake_llm.with_structured_output.return_value = FakeStructuredLLM()
+        fake_google_genai = types.ModuleType("langchain_google_genai")
+        fake_google_genai.ChatGoogleGenerativeAI = Mock(return_value=fake_llm)
+        fake_messages = types.ModuleType("langchain_core.messages")
+        fake_messages.HumanMessage = lambda content: ("human", content)
+        fake_messages.SystemMessage = lambda content: ("system", content)
+
+        with (
+            patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
+            patch.dict(
+                sys.modules,
+                {
+                    "langchain_core.messages": fake_messages,
+                    "langchain_google_genai": fake_google_genai,
+                },
+            ),
+        ):
+            with self.assertRaises(AIRateLimitError) as context:
+                invoke_invoice_parser("raw invoice text", "invoice.pdf")
+
+        message = str(context.exception)
+        self.assertIn("Gemini quota or rate limit reached", message)
+        self.assertIn("Retry after about 36.5 seconds", message)
+        self.assertNotIn("Traceback", message)
 
     def test_document_preview_accepts_image_path(self) -> None:
         """Image invoices should render into preview image paths."""
