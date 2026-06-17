@@ -80,6 +80,7 @@ def build_line_item(item: LineItem, position: int) -> InvoiceLineItem:
     row = InvoiceLineItem(
         position=position,
         sr_no=item.sr_no,
+        item_name=item.item_name,
         description=item.description,
         hsn_sac=item.hsn_sac,
         quantity=item.quantity,
@@ -137,6 +138,7 @@ def line_item_from_row(row: InvoiceLineItem) -> LineItem:
     """Build a LineItem model from an ORM row."""
     return LineItem(
         sr_no=row.sr_no,
+        item_name=row.item_name,
         description=row.description,
         hsn_sac=row.hsn_sac,
         quantity=row.quantity,

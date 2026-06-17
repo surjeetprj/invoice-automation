@@ -13,9 +13,9 @@ from .masters import (
     PURCHASE_VOUCHER_TYPE,
     add_text,
     address_lines,
-    normalize_stock_item_name,
     normalize_unit_name,
     pincode_from_address,
+    stock_item_name_from_line_item,
     vendor_state,
 )
 
@@ -74,7 +74,7 @@ def build_inventory_purchase_voucher_xml(invoice_id: int, data: InvoiceData) -> 
 
     for item in data.line_items:
         inventory_entry = SubElement(voucher, "ALLINVENTORYENTRIES.LIST")
-        stock_item_name = normalize_stock_item_name(item.description)
+        stock_item_name = stock_item_name_from_line_item(item)
         unit_name = tally_unit_text(item.unit)
         add_text(inventory_entry, "STOCKITEMNAME", stock_item_name)
         add_text(inventory_entry, "GSTOVRDNTAXABILITY", "Taxable")

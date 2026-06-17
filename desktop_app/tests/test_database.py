@@ -63,6 +63,7 @@ class DatabasePersistenceTests(unittest.TestCase):
             line_items=[
                 LineItem(
                     sr_no=1,
+                    item_name="Service",
                     description="Service",
                     hsn_sac="9983",
                     quantity=1,
@@ -100,6 +101,7 @@ class DatabasePersistenceTests(unittest.TestCase):
             self.assertIsNotNone(loaded)
             assert loaded is not None
             self.assertEqual(loaded.invoice_number, "INV-1")
+            self.assertEqual(loaded.line_items[0].item_name, "Service")
             self.assertEqual(loaded.line_items[0].description, "Service")
             self.assertEqual(loaded.line_items[0].taxes[0].tax_type, "IGST")
             self.assertEqual(loaded.tax_breakup[0].tax_amount, 180)
@@ -195,6 +197,7 @@ class DatabasePersistenceTests(unittest.TestCase):
 
         original_line = data.line_items[0].model_dump(mode="json")
         edited_values = flatten_line_item_taxes(original_line)
+        edited_values["item_name"] = "Corrected Clean Service"
         edited_values["description"] = "Corrected Service"
         corrected_line = build_line_item_taxes(edited_values, original_item=original_line)
         workflow = DesktopWorkflow()
@@ -217,6 +220,7 @@ class DatabasePersistenceTests(unittest.TestCase):
             self.assertIsNotNone(loaded)
             assert loaded is not None
             self.assertEqual(invoice.status, InvoiceStatus.APPROVED)
+            self.assertEqual(loaded.line_items[0].item_name, "Corrected Clean Service")
             self.assertEqual(loaded.line_items[0].description, "Corrected Service")
             self.assertEqual([tax.tax_type for tax in loaded.line_items[0].taxes], ["IGST", "CESS"])
             self.assertEqual(loaded.line_items[0].taxes[1].tax_amount, 10)
@@ -409,6 +413,38 @@ class DatabasePersistenceTests(unittest.TestCase):
             self.assertIsNone(invoice.extraction.mime_type)
             self.assertEqual(invoice.status, "Pending_Review")
             self.assertEqual(db.scalar(select(func.count(InvoiceValidationIssue.id))), 0)
+
+    def test_startup_migration_adds_item_name_to_existing_normalized_line_items(self) -> None:
+        """Existing normalized databases should gain the nullable item_name column."""
+        engine = self.make_engine()
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE invoice_line_items (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        extraction_id INTEGER NOT NULL,
+                        position INTEGER NOT NULL DEFAULT 0,
+                        sr_no INTEGER,
+                        description TEXT DEFAULT '',
+                        hsn_sac VARCHAR(30),
+                        quantity FLOAT DEFAULT 0.0,
+                        unit VARCHAR(30),
+                        rate FLOAT DEFAULT 0.0,
+                        discount FLOAT DEFAULT 0.0,
+                        taxable_value FLOAT DEFAULT 0.0,
+                        cess_amount FLOAT DEFAULT 0.0,
+                        total FLOAT DEFAULT 0.0
+                    )
+                    """
+                )
+            )
+
+        apply_startup_migrations(engine)
+
+        with engine.connect() as connection:
+            columns = [row[1] for row in connection.execute(text("PRAGMA table_info(invoice_line_items)"))]
+        self.assertIn("item_name", columns)
 
     def test_startup_migration_preserves_raw_markdown_when_legacy_json_is_malformed(self) -> None:
         """Malformed extracted_data should not block startup or lose raw text."""

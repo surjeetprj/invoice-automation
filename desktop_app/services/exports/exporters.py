@@ -65,7 +65,11 @@ def export_invoice_csv(invoice_id: int, data: InvoiceData) -> tuple[bytes, str]:
 
 def export_invoice_json(invoice_id: int, data: InvoiceData) -> tuple[bytes, str]:
     """Generate a JSON export for an invoice."""
-    payload = {"invoice_id": invoice_id, "exported_at": datetime.now().isoformat(), "data": data.model_dump()}
+    payload = {
+        "invoice_id": invoice_id,
+        "exported_at": datetime.now().isoformat(),
+        "data": data.model_dump(exclude={"line_items": {"__all__": {"item_name"}}}),
+    }
     return json.dumps(payload, indent=2, default=str).encode("utf-8"), make_filename(invoice_id, "json")
 
 

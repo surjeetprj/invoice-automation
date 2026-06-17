@@ -18,6 +18,14 @@ Important GST rules:
 - Use the taxable amount after line or invoice-level discount.
 - If a table has Qty, Rate, Discount, GST, Amount, preserve those values in the
   matching line item and tax rows.
+- For each line item, set item_name to the short clean product/service name and
+  keep description as the full visible row text.
+- Extract HSN/SAC even when embedded inside description text such as HSN: 997315,
+  SAC : 998434, or HSN/SAC 9973.
+- Extract unit from a visible unit column first, then from explicit description
+  text such as yr, year, month, nos, pcs, license, or user.
+- Do not include HSN/SAC, serial numbers, usernames, IP addresses, service
+  periods, or remarks in item_name.
 - Preserve GST component type, rate, taxable amount, and tax amount for CGST,
   SGST, IGST, and CESS in line item taxes and invoice-level tax_breakup.
 - Extract Bill To/Billed To/Customer and Ship To/Shipped To/Delivery To as
@@ -45,6 +53,14 @@ Important GST rules:
 - Use the taxable amount after line or invoice-level discount.
 - Preserve GST component type, rate, taxable amount, and tax amount for CGST,
   SGST, IGST, and CESS in line item taxes and invoice-level tax_breakup.
+- For each line item, set item_name to the short clean product/service name and
+  keep description as the full visible row text.
+- Extract HSN/SAC even when embedded inside description text such as HSN: 997315,
+  SAC : 998434, or HSN/SAC 9973.
+- Extract unit from a visible unit column first, then from explicit description
+  text such as yr, year, month, nos, pcs, license, or user.
+- Do not include HSN/SAC, serial numbers, usernames, IP addresses, service
+  periods, or remarks in item_name.
 - Extract individual line_items only when every visible row value needed for
   that row is reliable: description, quantity, rate, discount if present,
   taxable value, GST rate/amount, and row total when present.

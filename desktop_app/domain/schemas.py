@@ -43,6 +43,13 @@ class LineItem(BaseModel):
     """A single invoice product or service row."""
 
     sr_no: int | None = Field(default=None, description="Visible row serial number, if present.")
+    item_name: str | None = Field(
+        default=None,
+        description=(
+            "Short clean product or service name for ERP/Tally item masters. "
+            "Do not include HSN/SAC, serial numbers, usernames, IP addresses, service periods, or remarks."
+        ),
+    )
     description: str = Field(default="", description="Visible product or service description for this row.")
     hsn_sac: str | None = Field(default=None, description="Visible HSN or SAC code for this row.")
     quantity: float = Field(

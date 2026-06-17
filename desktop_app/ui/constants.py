@@ -37,7 +37,7 @@ FIELD_GROUPS = {
 COLLAPSIBLE_FIELD_GROUPS = {"Shipping & Transport", "Bank Details"}
 
 LINE_COLUMNS = [
-    ("sr_no", "Sr No"), ("description", "Description"), ("hsn_sac", "HSN/SAC"),
+    ("sr_no", "Sr No"), ("item_name", "Item Name"), ("description", "Description"), ("hsn_sac", "HSN/SAC"),
     ("unit", "Unit"), ("quantity", "Quantity"), ("rate", "Rate"),
     ("discount", "Discount"), ("taxable_value", "Taxable"),
     ("cgst_rate", "CGST %"), ("cgst_amount", "CGST Amount"),

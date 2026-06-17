@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Deterministic invoice normalization after AI extraction."""
 
+import re
 from typing import Any
 
 from ...config import CURRENCY_DECIMAL_PLACES, MATH_TOLERANCE, STATE_CODES
@@ -15,6 +16,7 @@ def normalize_extracted_data(data: dict[str, Any], document_kind: str | None = N
     normalize_gstin_fields(data)
     normalize_header_fields(data)
     normalize_numeric_fields(data)
+    enrich_line_item_identity(data)
     normalize_discounted_line_values(data)
     normalize_tax_components(data)
     normalize_tax_totals(data)
@@ -71,6 +73,83 @@ def normalize_numeric_fields(data: dict[str, Any]) -> None:
             tax["tax_type"] = str(tax.get("tax_type") or "").strip().upper()
             for field in ("tax_rate", "taxable_amount", "tax_amount"):
                 tax[field] = to_float(tax.get(field))
+
+
+def enrich_line_item_identity(data: dict[str, Any]) -> None:
+    """Fill missing item names, HSN/SAC codes, and units from visible descriptions."""
+    for item in data.get("line_items") or []:
+        if not isinstance(item, dict):
+            continue
+        description = str(item.get("description") or "").strip()
+        if not description:
+            continue
+        if not useful_text(item.get("hsn_sac")):
+            hsn_sac = extract_hsn_sac(description)
+            if hsn_sac:
+                item["hsn_sac"] = hsn_sac
+        if not useful_text(item.get("unit")):
+            unit = extract_unit(description)
+            if unit:
+                item["unit"] = unit
+        if not useful_text(item.get("item_name")):
+            item_name = extract_item_name(description)
+            if item_name:
+                item["item_name"] = item_name
+
+
+def useful_text(value: Any) -> bool:
+    """Return True when a value contains non-empty text."""
+    return isinstance(value, str) and bool(value.strip())
+
+
+def extract_hsn_sac(description: str) -> str | None:
+    """Extract an embedded HSN/SAC code from line description text."""
+    patterns = (
+        r"\bHSN\s*/\s*SAC\s*(?:Code)?\s*[:\-]?\s*([0-9]{4,8})\b",
+        r"\b(?:HSN|SAC)\s*(?:Code)?\s*[:\-]?\s*([0-9]{4,8})\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, description, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
+def extract_unit(description: str) -> str | None:
+    """Extract an explicit unit token from line description text."""
+    normalized = " ".join(description.replace("|", " ").split())
+    patterns = (
+        (r"\b\d+(?:\.\d+)?\s*(years?|yrs?|yr)\b", "Year"),
+        (r"\b\d+(?:\.\d+)?\s*(months?|mos?|month)\b", "Month"),
+        (r"\b\d+(?:\.\d+)?\s*(licenses?|licence|licences)\b", "License"),
+        (r"\b\d+(?:\.\d+)?\s*(users?)\b", "User"),
+        (r"\b(?:unit|uom)\s*[:\-]?\s*(NOS|NO|PCS|PC|PRS|PAIR|PAIRS|KGS|KG|LTR|MTR)\b", None),
+        (r"\b(NOS|NO|PCS|PC|PRS|PAIR|PAIRS|KGS|KG|LTR|MTR)\b", None),
+    )
+    for pattern, mapped in patterns:
+        match = re.search(pattern, normalized, flags=re.IGNORECASE)
+        if not match:
+            continue
+        return mapped or match.group(1).upper()
+    return None
+
+
+def extract_item_name(description: str) -> str | None:
+    """Extract a concise item/service name while preserving the full description elsewhere."""
+    text = " ".join(description.split())
+    if not text:
+        return None
+    metadata_pattern = (
+        r"\b(?:HSN\s*/\s*SAC|HSN|SAC|Serial|Sr\.?\s*No|Username|User\s*Name|Folder\s*Name|"
+        r"IP|From|Period|Dis\s*Price|PIN\s*Number)\b"
+    )
+    match = re.search(metadata_pattern, text, flags=re.IGNORECASE)
+    candidate = text[:match.start()].strip(" :-,|") if match else text
+    candidate = re.sub(r"\s+\d+(?:\.\d+)?\s*(?:years?|yrs?|yr|months?|mos?)\s*plan\b.*$", "", candidate, flags=re.IGNORECASE)
+    candidate = re.sub(r"\s+\d+\s*[|/]\s*\d+.*$", "", candidate).strip(" :-,|")
+    if not candidate:
+        candidate = text
+    return candidate[:255].strip() or None
 
 
 def normalize_discounted_line_values(data: dict[str, Any]) -> None:

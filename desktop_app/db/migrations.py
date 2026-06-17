@@ -40,6 +40,10 @@ EXTRACTION_COLUMN_DDL = {
     "mime_type": "ALTER TABLE invoice_extractions ADD COLUMN mime_type VARCHAR(100)",
 }
 
+LINE_ITEM_COLUMN_DDL = {
+    "item_name": "ALTER TABLE invoice_line_items ADD COLUMN item_name VARCHAR(255)",
+}
+
 INDEX_DDL = (
     "CREATE INDEX IF NOT EXISTS ix_invoices_status ON invoices(status)",
     "CREATE INDEX IF NOT EXISTS ix_invoices_invoice_number_extracted ON invoices(invoice_number_extracted)",
@@ -63,6 +67,7 @@ def apply_startup_migrations(bind: Engine) -> None:
     ensure_invoice_columns(bind)
     Base.metadata.create_all(bind)
     ensure_source_metadata_columns(bind)
+    ensure_line_item_columns(bind)
     ensure_indexes(bind)
     backfill_legacy_invoice_extractions(bind)
 
@@ -90,6 +95,19 @@ def ensure_source_metadata_columns(bind: Engine) -> None:
         for column, ddl in EXTRACTION_COLUMN_DDL.items():
             if column not in columns:
                 logger.info("Adding missing invoice_extractions.%s column", column)
+                connection.execute(text(ddl))
+
+
+def ensure_line_item_columns(bind: Engine) -> None:
+    """Add nullable line-item columns for existing normalized databases."""
+    with bind.begin() as connection:
+        inspector = inspect(connection)
+        if "invoice_line_items" not in inspector.get_table_names():
+            return
+        columns = {column["name"] for column in inspector.get_columns("invoice_line_items")}
+        for column, ddl in LINE_ITEM_COLUMN_DDL.items():
+            if column not in columns:
+                logger.info("Adding missing invoice_line_items.%s column", column)
                 connection.execute(text(ddl))
 
 

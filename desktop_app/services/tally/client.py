@@ -252,7 +252,7 @@ def validate_inventory_item_posting(data: InvoiceData) -> None:
     issues: list[str] = []
     for index, item in enumerate(data.line_items, start=1):
         line_issues: list[str] = []
-        if not (item.description or "").strip():
+        if not ((item.item_name or item.description or "").strip()):
             line_issues.append("item name is missing")
         if item.quantity <= 0:
             line_issues.append("quantity must be greater than 0")

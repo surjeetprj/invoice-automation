@@ -2,10 +2,11 @@ from __future__ import annotations
 
 """Regression tests for purchase voucher exports."""
 
+import json
 import unittest
 
 from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail
-from desktop_app.services.exports.exporters import build_erpnext_purchase_invoice_payload, export_invoice_tally
+from desktop_app.services.exports.exporters import build_erpnext_purchase_invoice_payload, export_invoice_json, export_invoice_tally
 
 
 class ExporterTests(unittest.TestCase):
@@ -24,6 +25,7 @@ class ExporterTests(unittest.TestCase):
             place_of_supply="Uttar Pradesh",
             line_items=[
                 LineItem(
+                    item_name="Clean Service",
                     description="Service",
                     hsn_sac="9983",
                     quantity=1,
@@ -65,6 +67,12 @@ class ExporterTests(unittest.TestCase):
         self.assertEqual(len(payload["taxes"]), 2)
         self.assertEqual(payload["taxes"][0]["account_head"], "Input CGST")
         self.assertEqual(payload["taxes"][0]["tax_amount"], 90)
+
+    def test_json_export_keeps_previous_line_item_shape(self) -> None:
+        """JSON file export should not expose the TallyPrime-only item_name field."""
+        content, _filename = export_invoice_json(1, self.sample_purchase_invoice())
+        payload = json.loads(content.decode("utf-8"))
+        self.assertNotIn("item_name", payload["data"]["line_items"][0])
 
 
 if __name__ == "__main__":

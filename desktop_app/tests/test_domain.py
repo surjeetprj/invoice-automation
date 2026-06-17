@@ -51,6 +51,8 @@ class DomainHelperTests(unittest.TestCase):
         self.assertIn("Complete visible invoice rows", invoice_properties["line_items"]["description"])
         self.assertIn("totals section", invoice_properties["total_taxable_amount"]["description"])
         self.assertIn("0.0 to 1.0", invoice_properties["confidence_score"]["description"])
+        self.assertIn("Short clean product or service name", line_properties["item_name"]["description"])
+        self.assertIn("Do not include HSN/SAC", line_properties["item_name"]["description"])
         self.assertIn("do not guess", line_properties["quantity"]["description"])
         self.assertIn("CGST, SGST, IGST, and CESS", line_properties["taxes"]["description"])
         self.assertIn("Taxable base amount", tax_properties["taxable_amount"]["description"])
@@ -68,6 +70,10 @@ class DomainHelperTests(unittest.TestCase):
             self.assertIn("SGST", prompt)
             self.assertIn("IGST", prompt)
             self.assertIn("CESS", prompt)
+            self.assertIn("item_name", prompt)
+            self.assertIn("full visible row text", prompt)
+            self.assertIn("HSN: 997315", prompt)
+            self.assertIn("yr, year, month, nos, pcs, license, or user", prompt)
 
         self.assertIn("Use both sources together", SYSTEM_PROMPT)
         self.assertIn("Return exactly one summary line", VISUAL_SYSTEM_PROMPT)
@@ -359,6 +365,49 @@ class DomainHelperTests(unittest.TestCase):
         })
         self.assertEqual(data["line_items"][0]["taxable_value"], 11200.0)
         self.assertEqual(data["line_items"][0]["total"], 11200.0)
+
+    def test_ai_normalization_extracts_item_identity_from_long_description(self) -> None:
+        """Long descriptions should populate item_name, HSN/SAC, and unit without losing text."""
+        description = (
+            "VPS Custom Configuration 1 Year Plan\n"
+            "Username : Vishalagarwal103, Anandkumar103\n"
+            "Folder Name : PI From 15-May-2026 to 14-May-2027\n"
+            "154.210.197.98:61004 HSN: 997315"
+        )
+        data = normalize_extracted_data({
+            "line_items": [{
+                "description": description,
+                "quantity": 1,
+                "rate": 22750,
+                "discount": 1137,
+                "taxable_value": 21613,
+            }],
+        })
+
+        item = data["line_items"][0]
+        self.assertEqual(item["item_name"], "VPS Custom Configuration")
+        self.assertEqual(item["hsn_sac"], "997315")
+        self.assertEqual(item["unit"], "Year")
+        self.assertEqual(item["description"], description)
+
+    def test_ai_normalization_keeps_existing_line_identity_fields(self) -> None:
+        """Reviewed or explicit identity fields should not be overwritten from description."""
+        data = normalize_extracted_data({
+            "line_items": [{
+                "item_name": "Reviewed Name",
+                "description": "Different Service HSN: 998434 1 Year Plan",
+                "hsn_sac": "1111",
+                "unit": "NOS",
+                "quantity": 1,
+                "rate": 100,
+                "taxable_value": 100,
+            }],
+        })
+
+        item = data["line_items"][0]
+        self.assertEqual(item["item_name"], "Reviewed Name")
+        self.assertEqual(item["hsn_sac"], "1111")
+        self.assertEqual(item["unit"], "NOS")
 
     def test_ai_normalization_maps_inter_state_generic_tax_to_igst(self) -> None:
         """Inter-state generic GST/UTGST rows should normalize to IGST."""

@@ -122,7 +122,7 @@ def unit_master_from_line_item(unit: str | None, *, action: str = "Create") -> T
 
 def stock_item_master_from_invoice_item(item: LineItem, data: InvoiceData, *, action: str = "Create") -> TallyMaster:
     """Build a stock item master from one reviewed invoice line item."""
-    stock_name = normalize_stock_item_name(item.description)
+    stock_name = stock_item_name_from_line_item(item)
     unit_name = normalize_unit_name(item.unit)
     return TallyMaster(
         stock_name,
@@ -605,3 +605,8 @@ def normalize_stock_item_name(description: str | None) -> str:
     """Normalize a reviewed line description for stock item master names."""
     cleaned = " ".join((description or "").strip().split())
     return cleaned or "Unknown Item"
+
+
+def stock_item_name_from_line_item(item: LineItem) -> str:
+    """Return the reviewed Tally stock item name, preferring clean item_name."""
+    return normalize_stock_item_name(item.item_name or item.description)

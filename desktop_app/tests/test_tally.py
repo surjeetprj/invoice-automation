@@ -46,6 +46,7 @@ class TallyServiceTests(unittest.TestCase):
             place_of_supply="Uttar Pradesh",
             line_items=[
                 LineItem(
+                    item_name="Consulting Service",
                     description="Consulting Service",
                     hsn_sac="9983",
                     quantity=1,
@@ -248,6 +249,49 @@ class TallyServiceTests(unittest.TestCase):
         self.assertIn("<LEDGERNAME>Input CGST</LEDGERNAME>", xml)
         self.assertIn("<LEDGERNAME>Input SGST</LEDGERNAME>", xml)
         self.assertIn("<ADDLALLOCTYPE>Appropriate by condition</ADDLALLOCTYPE>", xml)
+
+    def test_inventory_purchase_voucher_prefers_clean_item_name(self) -> None:
+        """Direct item-wise posting should use item_name for Tally stock item names."""
+        item = self.sample_invoice_data().line_items[0].model_copy(
+            update={
+                "item_name": "VPS Custom Configuration",
+                "description": "VPS Custom Configuration 1 Year Plan Username : user HSN: 997315",
+                "hsn_sac": "997315",
+            }
+        )
+        data = self.sample_invoice_data().model_copy(update={"line_items": [item]})
+
+        xml = build_inventory_purchase_voucher_xml(1, data).decode("utf-8")
+
+        self.assertIn("<STOCKITEMNAME>VPS Custom Configuration</STOCKITEMNAME>", xml)
+        self.assertIn("<GSTITEMSOURCE>VPS Custom Configuration</GSTITEMSOURCE>", xml)
+        self.assertNotIn("<STOCKITEMNAME>VPS Custom Configuration 1 Year Plan", xml)
+
+    def test_inventory_stock_item_master_prefers_clean_item_name(self) -> None:
+        """TallyPrime stock item masters should use item_name while preserving fallback."""
+        item = self.sample_invoice_data().line_items[0].model_copy(
+            update={
+                "item_name": "Clean Service",
+                "description": "Clean Service detailed support renewal HSN: 9983",
+            }
+        )
+        data = self.sample_invoice_data().model_copy(update={"line_items": [item]})
+
+        xml = build_inventory_stock_items_xml(data).decode("utf-8")
+
+        self.assertIn('<STOCKITEM NAME="Clean Service" ACTION="Alter">', xml)
+        self.assertNotIn('<STOCKITEM NAME="Clean Service detailed support renewal', xml)
+
+    def test_inventory_stock_item_name_falls_back_to_description(self) -> None:
+        """TallyPrime item-wise posting should still work when item_name is blank."""
+        item = self.sample_invoice_data().line_items[0].model_copy(
+            update={"item_name": None, "description": "Fallback Service"}
+        )
+        data = self.sample_invoice_data().model_copy(update={"line_items": [item]})
+
+        xml = build_inventory_purchase_voucher_xml(1, data).decode("utf-8")
+
+        self.assertIn("<STOCKITEMNAME>Fallback Service</STOCKITEMNAME>", xml)
 
     def test_direct_purchase_voucher_skips_gst_override_without_vendor_gstin(self) -> None:
         """Tally should receive accounting tax ledgers when party GSTIN is missing."""

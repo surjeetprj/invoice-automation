@@ -141,6 +141,7 @@ class InvoiceLineItem(Base):
     extraction_id: Mapped[int] = mapped_column(Integer, ForeignKey("invoice_extractions.id"), nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sr_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    item_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     description: Mapped[str] = mapped_column(Text, default="")
     hsn_sac: Mapped[str | None] = mapped_column(String(30), nullable=True)
     quantity: Mapped[float] = mapped_column(Float, default=0.0)
