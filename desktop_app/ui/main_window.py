@@ -50,7 +50,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Invoice AI Desktop")
         self.resize(1280, 820)
 
-        root = QSplitter(Qt.Orientation.Horizontal)
+        self.root_splitter = QSplitter(Qt.Orientation.Horizontal)
+        root = self.root_splitter
         root.setHandleWidth(1)
         root.addWidget(self.build_sidebar())
         self.stack = QStackedWidget()
@@ -61,7 +62,9 @@ class MainWindow(QMainWindow):
         for page in (self.dashboard, self.invoices, self.upload, self.detail):
             self.stack.addWidget(page)
         root.addWidget(self.stack)
-        root.setSizes([230, 1050])
+        root.setSizes([178, 1102])
+        root.setStretchFactor(0, 0)
+        root.setStretchFactor(1, 1)
         self.setCentralWidget(root)
 
         self.connect_signals()
@@ -76,9 +79,10 @@ class MainWindow(QMainWindow):
         """Create the left sidebar with app status, navigation, and reviewer name."""
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setMinimumWidth(220)
+        sidebar.setMinimumWidth(168)
+        sidebar.setMaximumWidth(220)
         layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(18, 24, 18, 18)
+        layout.setContentsMargins(14, 24, 14, 18)
 
         title = QLabel("Invoice AI")
         title.setObjectName("appTitle")
@@ -301,6 +305,9 @@ class MainWindow(QMainWindow):
         if fmt == "tally_post":
             self.post_invoice_to_tally(invoice_id)
             return
+        if fmt == "tally_post_items":
+            self.post_invoice_items_to_tally(invoice_id)
+            return
         if fmt == "tally_vendor":
             self.sync_vendor_master_to_tally(invoice_id)
             return
@@ -334,13 +341,17 @@ class MainWindow(QMainWindow):
             missing = result.get("missing_masters") or []
             create_missing = False
             if missing:
-                message = "TallyPrime is missing these masters:\n\n"
+                message = "TallyPrime is missing these masters for purchase voucher posting:\n\n"
                 message += "\n".join(f"- {name}" for name in missing)
-                message += "\n\nCreate these masters and post the invoice?"
-                if QMessageBox.question(self, "Post to TallyPrime", message) != QMessageBox.StandardButton.Yes:
+                message += "\n\nCreate these masters and post the purchase voucher?"
+                if QMessageBox.question(self, "Post Purchase Voucher to TallyPrime", message) != QMessageBox.StandardButton.Yes:
                     return
                 create_missing = True
-            elif QMessageBox.question(self, "Post to TallyPrime", "Post this approved invoice to TallyPrime?") != QMessageBox.StandardButton.Yes:
+            elif QMessageBox.question(
+                self,
+                "Post Purchase Voucher to TallyPrime",
+                "Post this approved invoice as a purchase voucher to TallyPrime?",
+            ) != QMessageBox.StandardButton.Yes:
                 return
 
             def posted(post_result: dict[str, Any]) -> None:
@@ -354,9 +365,43 @@ class MainWindow(QMainWindow):
 
         self.run_task(lambda: self.workflow.tally_preflight(invoice_id), preflight_done)
 
+    def post_invoice_items_to_tally(self, invoice_id: int) -> None:
+        """Preflight and post reviewed line items to local TallyPrime."""
+        def preflight_done(result: dict[str, Any]) -> None:
+            missing = result.get("missing_masters") or []
+            create_missing = False
+            if missing:
+                message = "TallyPrime is missing these masters for item-wise purchase voucher posting:\n\n"
+                message += "\n".join(f"- {name}" for name in missing)
+                message += "\n\nCreate these masters and post the item-wise purchase voucher?"
+                if QMessageBox.question(self, "Post Item-wise Purchase Voucher to TallyPrime", message) != QMessageBox.StandardButton.Yes:
+                    return
+                create_missing = True
+            elif QMessageBox.question(
+                self,
+                "Post Item-wise Purchase Voucher to TallyPrime",
+                "Post this approved invoice as an item-wise purchase voucher to TallyPrime?",
+            ) != QMessageBox.StandardButton.Yes:
+                return
+
+            def posted(post_result: dict[str, Any]) -> None:
+                QMessageBox.information(self, "TallyPrime", post_result.get("message", "Invoice items posted to TallyPrime."))
+                self.open_invoice(invoice_id)
+
+            self.run_task(
+                lambda: self.workflow.post_invoice_items_to_tally(invoice_id, create_missing_masters=create_missing),
+                posted,
+            )
+
+        self.run_task(lambda: self.workflow.tally_inventory_preflight(invoice_id), preflight_done)
+
     def sync_vendor_master_to_tally(self, invoice_id: int) -> None:
         """Update only the vendor ledger master in TallyPrime."""
-        if QMessageBox.question(self, "Sync Vendor Master", "Update this vendor ledger in TallyPrime with extracted vendor details?") != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(
+            self,
+            "Sync Vendor Ledger to TallyPrime",
+            "Update this vendor ledger in TallyPrime with extracted vendor details?",
+        ) != QMessageBox.StandardButton.Yes:
             return
 
         def synced(result: dict[str, Any]) -> None:
@@ -366,7 +411,11 @@ class MainWindow(QMainWindow):
 
     def sync_tally_system_ledgers(self, invoice_id: int) -> None:
         """Update purchase and GST ledger masters in TallyPrime."""
-        if QMessageBox.question(self, "Sync GST Ledgers", "Update Purchase Account and Input GST ledgers in TallyPrime?") != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(
+            self,
+            "Sync Purchase and GST Ledgers to TallyPrime",
+            "Update the purchase ledger and GST ledgers in TallyPrime?",
+        ) != QMessageBox.StandardButton.Yes:
             return
 
         def synced(result: dict[str, Any]) -> None:

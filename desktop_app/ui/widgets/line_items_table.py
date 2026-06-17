@@ -8,6 +8,7 @@ from typing import Any
 from PySide6.QtCore import QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor, QDoubleValidator, QIntValidator
 from PySide6.QtWidgets import (
+    QAbstractScrollArea,
     QHBoxLayout,
     QLineEdit,
     QPushButton,
@@ -48,6 +49,8 @@ class LineItemsTable(QWidget):
         self.table = QTableWidget(0, len(LINE_COLUMNS))
         self.table.setHorizontalHeaderLabels([label for _, label in LINE_COLUMNS])
         self.table.setItemDelegate(LineItemDelegate(self.table))
+        self.table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
+        self.table.setMinimumHeight(170)
         self.table.itemChanged.connect(self.item_changed)
         layout.addLayout(actions)
         layout.addWidget(self.table)
@@ -66,6 +69,7 @@ class LineItemsTable(QWidget):
                     cell.setData(ORIGINAL_LINE_ITEM_ROLE, original_item)
                 self.table.setItem(row, col, cell)
         self.loading = False
+        self.adjust_visible_height()
 
     def add_line(self) -> None:
         """Append a blank line item row."""
@@ -73,6 +77,7 @@ class LineItemsTable(QWidget):
         self.table.insertRow(row)
         for col, (name, _label) in enumerate(LINE_COLUMNS):
             self.table.setItem(row, col, QTableWidgetItem(str(row + 1) if name == "sr_no" else ""))
+        self.adjust_visible_height()
         self.changed.emit()
 
     def remove_line(self) -> None:
@@ -80,7 +85,16 @@ class LineItemsTable(QWidget):
         row = self.table.currentRow()
         if row >= 0:
             self.table.removeRow(row)
+            self.adjust_visible_height()
             self.changed.emit()
+
+    def adjust_visible_height(self) -> None:
+        """Keep embedded line rows visible inside the metadata scroll area."""
+        visible_rows = max(min(self.table.rowCount(), 6), 2)
+        header_height = self.table.horizontalHeader().height()
+        row_height = self.table.verticalHeader().defaultSectionSize()
+        frame_padding = self.table.frameWidth() * 2 + 18
+        self.table.setMinimumHeight(max(170, header_height + (visible_rows * row_height) + frame_padding))
 
     def item_changed(self, item: QTableWidgetItem) -> None:
         """Recalculate totals when editable numeric cells change."""

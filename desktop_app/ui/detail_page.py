@@ -8,8 +8,8 @@ from typing import Any
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QDoubleValidator
 from PySide6.QtWidgets import (
-    QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -25,11 +25,73 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .constants import FIELD_GROUPS, NUMERIC_FIELDS
+from .constants import COLLAPSIBLE_FIELD_GROUPS, EXPORT_ACTIONS, FIELD_GROUPS, NUMERIC_FIELDS, REQUIRED_METADATA_FIELDS
 from .widgets.audit_pane import AuditPane
-from .widgets.line_items_table import LineItemsTable, build_line_item_taxes, cast_line_field, flatten_line_item_taxes
+from .widgets.line_items_table import LineItemsTable
 from .widgets.pdf_preview import PdfPreview
 from .widgets.validation_pane import ValidationPane
+
+
+class CollapsibleSection(QFrame):
+    """Compact titled section with optional collapsed content."""
+
+    def __init__(self, title: str, *, collapsible: bool = False, expanded: bool = True) -> None:
+        super().__init__()
+        self.title = title
+        self.collapsible = collapsible
+        self.setObjectName("subsection")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setSpacing(6)
+
+        header = QHBoxLayout()
+        self.toggle = QToolButton()
+        self.toggle.setObjectName("sectionToggle")
+        self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.toggle.setText(title)
+        self.toggle.setCheckable(collapsible)
+        self.toggle.setChecked(expanded)
+        self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        self.toggle.toggled.connect(self.set_expanded)
+        if not collapsible:
+            self.toggle.setArrowType(Qt.ArrowType.NoArrow)
+        header.addWidget(self.toggle)
+        header.addStretch()
+        layout.addLayout(header)
+
+        self.hint = QLabel("")
+        self.hint.setObjectName("requiredHint")
+        self.hint.setVisible(False)
+        layout.addWidget(self.hint)
+
+        self.content = QWidget()
+        self.content_layout = QVBoxLayout(self.content)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(8)
+        layout.addWidget(self.content)
+        self.set_expanded(expanded)
+
+    def set_expanded(self, expanded: bool) -> None:
+        """Show or hide the section content."""
+        self.content.setVisible(expanded)
+        if self.collapsible:
+            self.toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+
+    def set_missing_hint(self, missing: list[str]) -> None:
+        """Show a compact list of missing required fields in this section."""
+        if missing:
+            self.hint.setText("Required: " + ", ".join(missing))
+            self.hint.setVisible(True)
+        else:
+            self.hint.clear()
+            self.hint.setVisible(False)
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        """Set collapse state for collapsible sections."""
+        if not self.collapsible:
+            return
+        self.toggle.setChecked(not collapsed)
+        self.set_expanded(not collapsed)
 
 
 class MetadataForm(QWidget):
@@ -37,36 +99,96 @@ class MetadataForm(QWidget):
 
     changed = Signal()
 
-    def __init__(self) -> None:
+    def __init__(self, line_items: LineItemsTable) -> None:
         """Build all metadata fields and group containers."""
         super().__init__()
         self.fields: dict[str, QLineEdit] = {}
+        self.labels: dict[str, QLabel] = {}
+        self.sections: dict[str, CollapsibleSection] = {}
+        self.line_items = line_items
+        self.line_items_section: CollapsibleSection | None = None
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         body = QWidget()
         body_layout = QVBoxLayout(body)
-        for group, fields in FIELD_GROUPS.items():
-            section = QFrame()
-            section.setObjectName("subsection")
-            section_layout = QVBoxLayout(section)
-            label = QLabel(group)
-            label.setObjectName("sectionTitle")
-            form = QFormLayout()
-            for field in fields:
-                edit = QLineEdit()
-                if field in NUMERIC_FIELDS:
-                    edit.setValidator(QDoubleValidator(bottom=-999999999.0, top=999999999.0, decimals=2))
-                edit.textChanged.connect(self.changed.emit)
-                self.fields[field] = edit
-                form.addRow(field.replace("_", " ").title(), edit)
-            section_layout.addWidget(label)
-            section_layout.addLayout(form)
-            body_layout.addWidget(section)
+        body_layout.setSpacing(8)
+
+        self.add_field_section(body_layout, "Voucher Details", FIELD_GROUPS["Voucher Details"])
+        party_row = QHBoxLayout()
+        party_row.setSpacing(8)
+        party_row.addWidget(self.build_field_section("Vendor / Party Details", FIELD_GROUPS["Vendor / Party Details"]))
+        party_row.addWidget(self.build_field_section("Customer / Buyer Details", FIELD_GROUPS["Customer / Buyer Details"]))
+        body_layout.addLayout(party_row)
+
+        self.line_items_section = CollapsibleSection("Line Items", collapsible=True, expanded=True)
+        self.line_items_section.content_layout.addWidget(self.line_items)
+        body_layout.addWidget(self.line_items_section)
+
+        for group in ("Shipping & Transport", "Bank Details", "Tax & Totals"):
+            self.add_field_section(
+                body_layout,
+                group,
+                FIELD_GROUPS[group],
+                collapsible=group in COLLAPSIBLE_FIELD_GROUPS,
+                expanded=group not in COLLAPSIBLE_FIELD_GROUPS,
+            )
         body_layout.addStretch()
         scroll.setWidget(body)
         outer.addWidget(scroll)
+
+    def add_field_section(
+        self,
+        layout: QVBoxLayout,
+        title: str,
+        fields: list[str],
+        *,
+        collapsible: bool = False,
+        expanded: bool = True,
+    ) -> None:
+        """Build and add one metadata field section."""
+        layout.addWidget(self.build_field_section(title, fields, collapsible=collapsible, expanded=expanded))
+
+    def build_field_section(
+        self,
+        title: str,
+        fields: list[str],
+        *,
+        collapsible: bool = False,
+        expanded: bool = True,
+    ) -> CollapsibleSection:
+        """Return one compact two-column metadata section."""
+        section = CollapsibleSection(title, collapsible=collapsible, expanded=expanded)
+        self.sections[title] = section
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
+        for index, field in enumerate(fields):
+            row = index // 2
+            offset = (index % 2) * 2
+            label = QLabel(self.field_label(field))
+            label.setObjectName("requiredLabel" if field in REQUIRED_METADATA_FIELDS else "fieldLabel")
+            edit = QLineEdit()
+            edit.setMinimumWidth(150)
+            if field in NUMERIC_FIELDS:
+                edit.setValidator(QDoubleValidator(bottom=-999999999.0, top=999999999.0, decimals=2))
+            edit.textChanged.connect(self.changed.emit)
+            edit.textChanged.connect(self.update_required_state)
+            self.fields[field] = edit
+            self.labels[field] = label
+            grid.addWidget(label, row, offset)
+            grid.addWidget(edit, row, offset + 1)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        section.content_layout.addLayout(grid)
+        return section
+
+    def field_label(self, field: str) -> str:
+        """Return a reviewer-friendly field label."""
+        label = field.replace("_", " ").title()
+        return f"{label} *" if field in REQUIRED_METADATA_FIELDS else label
 
     def load_data(self, data: dict[str, Any]) -> None:
         """Populate form fields from extracted invoice data."""
@@ -75,15 +197,70 @@ class MetadataForm(QWidget):
             value = data.get(name)
             edit.setText("" if value is None else str(value))
             edit.blockSignals(False)
+        self.update_optional_collapses(data)
+        self.update_required_state()
+
+    def update_optional_collapses(self, data: dict[str, Any]) -> None:
+        """Collapse optional sections that have no extracted values."""
+        for group in COLLAPSIBLE_FIELD_GROUPS:
+            section = self.sections.get(group)
+            fields = FIELD_GROUPS.get(group, [])
+            if section:
+                section.set_collapsed(not any(str(data.get(field) or "").strip() for field in fields))
+
+    def set_line_item_count(self, count: int) -> None:
+        """Update required state for the embedded line-item section."""
+        if self.line_items_section:
+            self.line_items_section.set_missing_hint([] if count else ["At least one line item"])
+
+    def update_required_state(self, *_args) -> None:
+        """Highlight empty export-essential fields without blocking review actions."""
+        missing_by_section: dict[str, list[str]] = {title: [] for title in self.sections}
+        for field in REQUIRED_METADATA_FIELDS:
+            edit = self.fields.get(field)
+            label = self.labels.get(field)
+            if edit is None or label is None:
+                continue
+            missing = not edit.text().strip()
+            if missing:
+                self.set_object_name(edit, "requiredMissing")
+            elif edit.objectName() == "requiredMissing":
+                self.set_object_name(edit, "")
+            self.set_object_name(label, "requiredMissingLabel" if missing else "requiredLabel")
+            if missing:
+                section_name = self.section_for_field(field)
+                missing_by_section.setdefault(section_name, []).append(field.replace("_", " ").title())
+        for section_name, missing in missing_by_section.items():
+            section = self.sections.get(section_name)
+            if section:
+                section.set_missing_hint(missing)
+
+    def section_for_field(self, field: str) -> str:
+        """Return the section title containing a field."""
+        for title, fields in FIELD_GROUPS.items():
+            if field in fields:
+                return title
+        return "Voucher Details"
+
+    def set_object_name(self, widget: QWidget, name: str) -> None:
+        """Update QSS object name and force the widget to refresh styling."""
+        if widget.objectName() == name:
+            return
+        widget.setObjectName(name)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
 
     def is_valid(self) -> bool:
         """Return True when all validator-backed fields are acceptable."""
+        valid = True
         for edit in self.fields.values():
             if edit.validator() and not edit.hasAcceptableInput() and edit.text().strip():
-                edit.setObjectName("invalidInput")
-                return False
-            edit.setObjectName("")
-        return True
+                self.set_object_name(edit, "invalidInput")
+                valid = False
+            elif edit.objectName() == "invalidInput":
+                self.set_object_name(edit, "")
+        self.update_required_state()
+        return valid
 
     def values(self) -> dict[str, Any]:
         """Return the current form values with backend-compatible casting."""
@@ -123,23 +300,25 @@ class DetailPage(QWidget):
         header.addStretch()
         layout.addLayout(header)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter = self.splitter
         self.tabs = QTabWidget()
-        self.metadata = MetadataForm()
         self.line_items = LineItemsTable()
+        self.metadata = MetadataForm(self.line_items)
         self.validation = ValidationPane()
         self.audit = AuditPane()
         self.metadata.changed.connect(self.mark_dirty)
         self.line_items.changed.connect(self.mark_dirty)
+        self.line_items.changed.connect(lambda: self.metadata.set_line_item_count(self.line_items.table.rowCount()))
         self.audit.load_requested.connect(self.request_audit)
         self.tabs.addTab(self.metadata, "Metadata")
-        self.tabs.addTab(self.line_items, "Line Items")
         self.tabs.addTab(self.validation, "Validation")
         self.tabs.addTab(self.audit, "Audit Logs")
         self.tabs.currentChanged.connect(self.tab_changed)
 
         pdf_panel = QFrame()
         pdf_panel.setObjectName("pdfPanel")
+        pdf_panel.setMinimumWidth(360)
         pdf_layout = QVBoxLayout(pdf_panel)
         pdf_header = QLabel("Invoice Document")
         pdf_header.setObjectName("sectionTitle")
@@ -149,7 +328,9 @@ class DetailPage(QWidget):
 
         splitter.addWidget(self.tabs)
         splitter.addWidget(pdf_panel)
-        splitter.setSizes([560, 720])
+        splitter.setSizes([820, 460])
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter, stretch=1)
 
         footer = QHBoxLayout()
@@ -161,7 +342,7 @@ class DetailPage(QWidget):
         self.export_btn.setText("Export Data")
         self.export_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(self.export_btn)
-        for fmt, label in [("csv", "CSV"), ("json", "JSON"), ("tally", "Tally XML"), ("tally_post", "Post to TallyPrime"), ("tally_vendor", "Sync Vendor Master"), ("tally_ledgers", "Sync GST Ledgers"), ("erpnext", "ERPNext")]:
+        for fmt, label in EXPORT_ACTIONS:
             action = QAction(label, self)
             action.triggered.connect(lambda _checked=False, f=fmt: self.request_export(f))
             menu.addAction(action)
@@ -184,6 +365,7 @@ class DetailPage(QWidget):
         self.summary.setText(f"Confidence: {float(confidence) * 100:.0f}%" if confidence is not None else "")
         self.metadata.load_data(self.original_data)
         self.line_items.load_items(self.original_data.get("line_items") or [])
+        self.metadata.set_line_item_count(self.line_items.table.rowCount())
         self.validation.set_validation(invoice.get("validation"))
         self.audit.set_logs([])
         self.dirty = False
