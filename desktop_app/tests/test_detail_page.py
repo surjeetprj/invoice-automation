@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -34,8 +35,12 @@ class DetailPageLayoutTests(unittest.TestCase):
             self.assertEqual([page.tabs.tabText(index) for index in range(page.tabs.count())], ["Metadata", "Validation", "Audit Logs"])
             self.assertEqual(page.splitter.widget(1).minimumWidth(), 360)
             labels = [action.text() for action in page.export_btn.menu().actions()]
+            self.assertIn("✕ CSV", labels)
+            self.assertIn("✕ JSON", labels)
+            self.assertIn("✕ Tally XML", labels)
             self.assertIn("Post Purchase Voucher to TallyPrime", labels)
             self.assertIn("Post Item-wise Purchase Voucher to TallyPrime", labels)
+            self.assertIn("✕ ERPNext", labels)
         finally:
             page.deleteLater()
 
@@ -182,6 +187,55 @@ class DetailPageLayoutTests(unittest.TestCase):
             self.assertEqual(page.build_corrections()["vendor_name"], "Vendor C")
         finally:
             page.deleteLater()
+
+    def test_main_window_uses_top_bar_navigation(self) -> None:
+        """The app shell should use a top bar instead of the old sidebar splitter."""
+
+        def run_immediately(self, task, callback, *args, on_error=None):
+            try:
+                callback(task(*args))
+            except Exception as exc:
+                if on_error:
+                    on_error(str(exc))
+                else:
+                    raise
+
+        class FakeWorkflow:
+            def initialize(self):
+                return None
+
+            def health(self):
+                return {"status": "ok"}
+
+            def stats(self):
+                return {}
+
+            def list_invoices(self):
+                return {"invoices": []}
+
+        with (
+            patch("desktop_app.ui.main_window.DesktopWorkflow", return_value=FakeWorkflow()),
+            patch.object(MainWindow, "run_task", new=run_immediately),
+        ):
+            window = MainWindow()
+            self.app.processEvents()
+            try:
+                central = window.centralWidget()
+                self.assertEqual(central.layout().count(), 2)
+                top_bar = central.layout().itemAt(0).widget()
+                self.assertEqual(top_bar.objectName(), "topBar")
+                self.assertFalse(hasattr(window, "root_splitter"))
+                self.assertEqual(set(window.nav_buttons), {"dashboard", "invoices", "upload"})
+
+                window.show_invoices()
+                self.assertTrue(window.nav_buttons["invoices"].property("active"))
+                self.assertFalse(window.nav_buttons["dashboard"].property("active"))
+
+                window.reviewer.setText("approver")
+                self.assertEqual(window.reviewer_name(), "approver")
+            finally:
+                window.close()
+                window.deleteLater()
 
 
 if __name__ == "__main__":
