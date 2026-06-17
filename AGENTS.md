@@ -32,14 +32,20 @@ Working rules:
   in workflow and UI labels. Ledger-only posting creates accounting purchase
   vouchers; item-wise posting creates inventory purchase vouchers with stock
   item and unit masters only after reviewer confirmation.
+- Keep `LineItem.item_name` as the clean TallyPrime stock item/master name.
+  Preserve `LineItem.description` as the full visible invoice row text.
 - Keep database models, repository helpers, and migrations in `desktop_app/db`.
 - Keep Pydantic schemas, parsing helpers, and validation in `desktop_app/domain`.
 - Keep review UI changes focused on surfacing missing export-essential fields
   early, especially voucher details, party details, line items, tax totals, and
   Tally/ERP master mapping inputs.
+- `Submit Corrections` must only save corrected extraction data and revalidate.
+  Approval must remain a separate explicit reviewer action.
 - Improve AI extraction through Pydantic field descriptions, prompts, configurable
   model choice, normalization, and validation before adding ad hoc post-LLM
   enrichment modules.
+- Keep Gemini quota/rate-limit failures reviewable: persist the invoice with a
+  validation issue instead of crashing the desktop app.
 - Do not commit `.env`, `.venv`, runtime uploads, exports, logs, or local SQLite databases.
 - Do not delete local runtime data unless the user explicitly asks for cleanup.
 - Prefer preserving user invoice history, audit logs, and review state during upgrades.

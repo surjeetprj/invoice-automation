@@ -27,6 +27,12 @@ The extracted data then passes through deterministic normalization, domain
 validation, normalized SQLite persistence, human review, and purchase voucher
 export.
 
+Digital PDF extraction can be enabled or disabled for table parsing with
+`PDF_TABLE_EXTRACTION_ENABLED`. Workflow logs report PDF extraction time and AI
+parsing time separately so slow invoices can be diagnosed without guessing.
+Gemini quota/rate-limit failures are converted into validation issues and the
+invoice remains available for review.
+
 ## Key Modules
 
 - `services/workflow.py`: UI-facing invoice lifecycle orchestration.
@@ -35,7 +41,8 @@ export.
   configured model.
 - `services/documents/extraction.py`: digital PDF text and table extraction.
 - `services/parsing/invoice_normalizer.py`: numeric, GST, total, and visual line-item
-  reconciliation.
+  reconciliation, plus deterministic line-item identity cleanup for item names,
+  HSN/SAC codes, and units.
 - `domain/schemas.py`: Pydantic data contracts shared across layers.
 - `domain/validation.py`: GST and arithmetic validation rules.
 - `db/models.py`: normalized SQLAlchemy tables.
@@ -84,8 +91,9 @@ Both modes follow a controlled flow:
 - Create or sync the vendor ledger, purchase ledger, GST ledgers, and purchase
   voucher type where allowed.
 - For item-wise posting, create or sync required stock groups, units, and stock
-  items where allowed. V1 uses reviewed line-item descriptions as stock item
-  names and reviewed units after simple cleanup.
+  items where allowed. Item-wise posting uses reviewed `item_name` values as
+  clean stock item/master names and preserves the full invoice `description`
+  separately.
 - Mark the invoice as `Posted` only after Tally accepts the voucher.
 
 Master creation is intentionally controlled. Vendor ledgers are created under
@@ -98,3 +106,13 @@ downgrading to ledger-only posting.
 For scanned/image invoices, reliable invoice totals are preferred over
 unreliable visual line-item detail. If visual line rows do not reconcile with
 invoice totals, normalization creates one ERP-safe summary purchase line.
+
+## Review Corrections
+
+The review flow separates saving corrections from approval:
+
+- `Submit Corrections` persists edited invoice fields and line items, refreshes
+  validation, and keeps the existing invoice status, normally `Pending_Review`.
+- Reviewers can submit corrections repeatedly; each save reloads the detail
+  page from the saved payload.
+- `Approve` is the only UI action that marks the invoice approved.

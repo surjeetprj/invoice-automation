@@ -30,6 +30,8 @@ Add your Gemini API key in `.env`:
 GOOGLE_API_KEY=your_gemini_key
 # Optional: keep or change the Gemini extraction model.
 GEMINI_MODEL=gemini-2.5-flash-lite
+# Optional: turn PDF table extraction on or off.
+PDF_TABLE_EXTRACTION_ENABLED=true
 ```
 
 Run the app:
@@ -72,6 +74,10 @@ checked against the document preview quickly. Required markers are informational
 in this version; they highlight likely export problems but do not block approval
 by themselves.
 
+`Submit Corrections` saves edited extraction data and refreshes validation, but
+it does not approve the invoice. Reviewers can save corrections multiple times.
+Final approval always requires a separate click on `Approve`.
+
 The Export Data menu supports file-based exports and direct TallyPrime posting:
 
 - `CSV`, `JSON`, `Tally XML`, and `ERPNext` create downloadable export files.
@@ -86,8 +92,10 @@ The Export Data menu supports file-based exports and direct TallyPrime posting:
 Direct TallyPrime posting requires TallyPrime to be running locally with the
 target company open and HTTP enabled, usually at `http://localhost:9000`.
 Missing masters are created only after reviewer confirmation. Item-wise posting
-can create required units, stock groups, and stock items, and it blocks before
-posting when reviewed item data is incomplete.
+uses the reviewed `Item Name` field as the clean TallyPrime stock item/master
+name while preserving the full invoice description separately. It can create
+required units, stock groups, and stock items, and it blocks before posting when
+reviewed item data is incomplete.
 
 ## Developer Context
 

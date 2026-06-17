@@ -20,6 +20,8 @@
   schema descriptions, prompts, model choice, normalization, or validation.
 - GST rates must remain visible, editable, preserved through corrections, and
   available for export.
+- Line items have both `item_name` and `description`. `item_name` is the clean
+  TallyPrime stock item/master name; `description` is the full invoice row text.
 - Exports represent purchase vouchers, not sales invoices.
 - The Metadata tab is the primary reviewer workspace. Line items belong inside
   Metadata, alongside voucher, party, shipping, bank, and tax-total groups, so
@@ -35,8 +37,8 @@
 - Ledger-only posting remains available as the stable fallback when reviewed
   item data is incomplete or inventory posting is not desired.
 - Item-wise TallyPrime posting may create stock groups, units, and stock item
-  masters after reviewer confirmation. V1 uses reviewed line-item descriptions
-  as stock item names and reviewed unit text after simple cleanup.
+  masters after reviewer confirmation. It uses reviewed line-item `item_name`
+  values as stock item names and reviewed unit text after simple cleanup.
 - Item-wise posting must block before sending a voucher to TallyPrime when
   required item fields are incomplete; it must not silently downgrade to
   ledger-only posting.
@@ -47,5 +49,10 @@
 - For scanned/image invoices, ERP-safe totals are preferred over unreliable
   item-level detail.
 - Failed AI parsing should still leave an invoice available for pending review.
+- Gemini quota or rate-limit failures should not crash processing; the invoice
+  should remain reviewable with a clear validation issue.
+- Submit Corrections is a save-only review action. It must preserve the current
+  invoice status and review metadata, allow repeated saves, and never mark the
+  invoice approved.
 - Runtime uploads, exports, logs, `.env`, `.venv`, and local SQLite databases
   must stay out of git.
