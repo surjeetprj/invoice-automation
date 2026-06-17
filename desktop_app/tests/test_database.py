@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import unittest
+from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from sqlalchemy import create_engine, func, select, text
@@ -30,7 +32,9 @@ from desktop_app.db.repository import (
 )
 from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail, ValidationResult
 from desktop_app.domain.validation import validate_invoice
+from desktop_app.services.documents.document_source import DocumentKind, InvoiceSource
 from desktop_app.services.exports.exporters import export_invoice_tally
+from desktop_app.services.parsing.ai_client import AIRateLimitError
 from desktop_app.services.workflow import DesktopWorkflow
 from desktop_app.ui.widgets.line_items_table import build_line_item_taxes, flatten_line_item_taxes
 
@@ -147,6 +151,34 @@ class DatabasePersistenceTests(unittest.TestCase):
             self.assertEqual(record["raw_markdown"], "raw text")
             self.assertEqual(record["extracted_data"]["invoice_number"], "INV-1")
             self.assertEqual(record["validation"]["issues"], [])
+
+    def test_run_pipeline_handles_ai_rate_limit_cleanly(self) -> None:
+        """Quota failures should create reviewable validation issues without losing raw text."""
+        with self.make_session() as db:
+            invoice = Invoice(filename="invoice.pdf", file_path="invoice.pdf", status=InvoiceStatus.NEW)
+            db.add(invoice)
+            db.commit()
+            source = InvoiceSource(path=Path("invoice.pdf"), document_kind=DocumentKind.DIGITAL_PDF, mime_type="application/pdf")
+            workflow = DesktopWorkflow()
+
+            with (
+                patch("desktop_app.services.workflow.classify_document", return_value=source),
+                patch("desktop_app.services.workflow.extract_invoice_source_text", return_value="raw invoice text"),
+                patch(
+                    "desktop_app.services.workflow.parse_invoice",
+                    side_effect=AIRateLimitError("Gemini quota or rate limit reached. Retry after about 36 seconds."),
+                ),
+            ):
+                workflow.run_pipeline(db, invoice, Path("invoice.pdf"))
+
+            db.refresh(invoice)
+            self.assertEqual(invoice.status, InvoiceStatus.PENDING_REVIEW)
+            self.assertEqual(raw_markdown_from_invoice(invoice), "raw invoice text")
+            validation = validation_from_invoice(invoice)
+            self.assertFalse(validation.is_valid)
+            self.assertIn("quota", validation.errors[0].lower())
+            messages = [log.action for log in invoice.audit_logs]
+            self.assertTrue(any(message.startswith("AI quota/rate limit") for message in messages))
 
     def test_approve_with_corrections_preserves_nested_line_taxes_for_validation_and_export(self) -> None:
         """Review-table corrections should not drop nested tax rows hidden from the grid."""
