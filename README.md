@@ -14,17 +14,17 @@ Use these steps when installing the app on a machine for normal use.
 
 ```powershell
 git clone https://github.com/surjeetprj/invoice-automation.git
-cd invoice-automation\desktop_app
+cd invoice-automation
 
 py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -U pip
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r .\desktop_app\requirements.txt
 
-Copy-Item .env.example .env
-notepad .env
+Copy-Item .\desktop_app\.env.example .\desktop_app\.env
+notepad .\desktop_app\.env
 ```
 
-Add your Gemini API key in `.env`:
+Add your Gemini API key in `desktop_app\.env`:
 
 ```env
 GOOGLE_API_KEY=your_gemini_key
@@ -34,29 +34,33 @@ GEMINI_MODEL=gemini-2.5-flash-lite
 PDF_TABLE_EXTRACTION_ENABLED=true
 ```
 
-Run the app:
+Run the app from the project root:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py
+.\.venv\Scripts\Activate.ps1
+python desktop_app
 ```
 
 ## Run Later
 
-After setup is complete, start the app with:
+After setup is complete, start the app from the project root with:
+
+```powershell
+cd C:\Users\surje\Documents\invoice_automation
+.\.venv\Scripts\Activate.ps1
+python desktop_app
+```
+
+If you are already inside `desktop_app`, use:
 
 ```powershell
 cd C:\Users\surje\Documents\invoice_automation\desktop_app
-.\.venv\Scripts\python.exe main.py
+..\.venv\Scripts\Activate.ps1
+python app.py
 ```
 
-If the virtual environment is already activated:
-
-```powershell
-python main.py
-```
-
-Do not run `python desktop_app` from inside the `desktop_app` folder. That asks
-Python to open a file named `desktop_app`, which does not exist.
+Use `python desktop_app` only from the project root. From inside
+`desktop_app`, use `python app.py`.
 
 ## Upgrade Behavior
 
@@ -101,17 +105,17 @@ reviewed item data is incomplete.
 
 For architecture and safe-codebase context, see:
 
-- [`../AGENTS.md`](../AGENTS.md)
-- [`ARCHITECTURE.md`](ARCHITECTURE.md)
-- [`DECISIONS.md`](DECISIONS.md)
+- [`AGENTS.md`](AGENTS.md)
+- [`desktop_app/ARCHITECTURE.md`](desktop_app/ARCHITECTURE.md)
+- [`desktop_app/DECISIONS.md`](desktop_app/DECISIONS.md)
 
 ## Developer Install
 
 Use editable install when changing code locally.
 
 ```powershell
-cd C:\Users\surje\Documents\invoice_automation\desktop_app
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+cd C:\Users\surje\Documents\invoice_automation
+.\.venv\Scripts\python.exe -m pip install -e ".\desktop_app[dev]"
 ```
 
 ## Tests
@@ -119,7 +123,7 @@ cd C:\Users\surje\Documents\invoice_automation\desktop_app
 Run checks before committing changes:
 
 ```powershell
-cd C:\Users\surje\Documents\invoice_automation\desktop_app
-.\.venv\Scripts\python.exe -m compileall -q -x "(\.venv|runtime|__pycache__)" .
-.\.venv\Scripts\python.exe -m pytest tests -q
+cd C:\Users\surje\Documents\invoice_automation
+.\.venv\Scripts\python.exe -m compileall -q -x "(\.venv|runtime|__pycache__)" desktop_app
+.\.venv\Scripts\python.exe -m pytest desktop_app\tests -q
 ```

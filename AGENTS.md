@@ -10,12 +10,18 @@ Core flow:
 upload invoice -> classify document -> parse/extract -> normalize -> validate -> persist -> review -> export
 ```
 
-Important commands, run from `desktop_app`:
+Important commands:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py
-.\.venv\Scripts\python.exe -m compileall -q -x "(\.venv|runtime|__pycache__)" .
-.\.venv\Scripts\python.exe -m pytest tests -q
+# From the project root, after activating .venv:
+python desktop_app
+
+# From desktop_app, after activating ..\.venv:
+python app.py
+
+# Checks from the project root:
+.\.venv\Scripts\python.exe -m compileall -q -x "(\.venv|runtime|__pycache__)" desktop_app
+.\.venv\Scripts\python.exe -m pytest desktop_app\tests -q
 ```
 
 Working rules:
