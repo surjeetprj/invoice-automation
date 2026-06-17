@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import Qt, QThreadPool, QTimer
+from PySide6.QtCore import QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
-    QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -34,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
-    """Top-level desktop shell with sidebar navigation and page routing."""
+    """Top-level desktop shell with top navigation and page routing."""
 
     def __init__(self) -> None:
         """Initialize workflow services, pages, worker pool, and health checks."""
@@ -50,10 +49,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Invoice AI Desktop")
         self.resize(1280, 820)
 
-        self.root_splitter = QSplitter(Qt.Orientation.Horizontal)
-        root = self.root_splitter
-        root.setHandleWidth(1)
-        root.addWidget(self.build_sidebar())
+        shell = QWidget()
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+        shell_layout.addWidget(self.build_top_bar())
+
         self.stack = QStackedWidget()
         self.dashboard = DashboardPage()
         self.invoices = InvoicesPage()
@@ -61,11 +62,8 @@ class MainWindow(QMainWindow):
         self.detail = DetailPage()
         for page in (self.dashboard, self.invoices, self.upload, self.detail):
             self.stack.addWidget(page)
-        root.addWidget(self.stack)
-        root.setSizes([178, 1102])
-        root.setStretchFactor(0, 0)
-        root.setStretchFactor(1, 1)
-        self.setCentralWidget(root)
+        shell_layout.addWidget(self.stack, stretch=1)
+        self.setCentralWidget(shell)
 
         self.connect_signals()
         self.health_timer = QTimer(self)
@@ -75,25 +73,25 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self.check_health)
         QTimer.singleShot(0, self.load_dashboard)
 
-    def build_sidebar(self) -> QWidget:
-        """Create the left sidebar with app status, navigation, and reviewer name."""
-        sidebar = QFrame()
-        sidebar.setObjectName("sidebar")
-        sidebar.setMinimumWidth(168)
-        sidebar.setMaximumWidth(220)
-        layout = QVBoxLayout(sidebar)
-        layout.setContentsMargins(14, 24, 14, 18)
+    def build_top_bar(self) -> QWidget:
+        """Create the top bar with app status, navigation, and reviewer name."""
+        top_bar = QFrame()
+        top_bar.setObjectName("topBar")
+        layout = QHBoxLayout(top_bar)
+        layout.setContentsMargins(18, 10, 18, 10)
+        layout.setSpacing(12)
 
         title = QLabel("Invoice AI")
         title.setObjectName("appTitle")
         status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(6)
         self.status_dot = QLabel()
         self.status_dot.setFixedSize(10, 10)
         self.status_text = QLabel("Checking")
         self.status_text.setObjectName("muted")
         status_row.addWidget(self.status_dot)
         status_row.addWidget(self.status_text)
-        status_row.addStretch()
 
         buttons = {
             "dashboard": ("Dashboard", self.show_dashboard),
@@ -102,11 +100,10 @@ class MainWindow(QMainWindow):
         }
         layout.addWidget(title)
         layout.addLayout(status_row)
-        layout.addSpacing(18)
         for key, (label, handler) in buttons.items():
             button = QPushButton(label)
             button.setObjectName("navButton")
-            button.setMinimumHeight(38)
+            button.setMinimumHeight(34)
             button.clicked.connect(handler)
             self.nav_buttons[key] = button
             layout.addWidget(button)
@@ -115,9 +112,11 @@ class MainWindow(QMainWindow):
         reviewer_label = QLabel("Reviewer")
         reviewer_label.setObjectName("sectionTitle")
         self.reviewer = QLineEdit("reviewer")
+        self.reviewer.setMinimumWidth(140)
+        self.reviewer.setMaximumWidth(190)
         layout.addWidget(reviewer_label)
         layout.addWidget(self.reviewer)
-        return sidebar
+        return top_bar
 
     def connect_signals(self) -> None:
         """Connect page-level signals to workflow actions."""
@@ -136,7 +135,7 @@ class MainWindow(QMainWindow):
         self.detail.pdf_preview.zoom_requested.connect(lambda _zoom: self.reload_current_document())
 
     def show_page(self, key: str, page: QWidget) -> None:
-        """Switch to a page and update sidebar active state."""
+        """Switch to a page and update navigation active state."""
         self.stack.setCurrentWidget(page)
         for name, button in self.nav_buttons.items():
             button.setProperty("active", name == key)
@@ -186,7 +185,7 @@ class MainWindow(QMainWindow):
         self.thread_pool.start(worker)
 
     def check_health(self) -> None:
-        """Refresh the sidebar readiness indicator."""
+        """Refresh the top-bar readiness indicator."""
         def ok(_result: Any) -> None:
             self.status_dot.setStyleSheet("border-radius: 5px; background: #10b981;")
             self.status_text.setText("Ready")
@@ -194,7 +193,7 @@ class MainWindow(QMainWindow):
         self.run_task(self.workflow.health, ok, on_error=lambda _err: self.set_offline())
 
     def set_offline(self) -> None:
-        """Show a local database/service error in the sidebar."""
+        """Show a local database/service error in the top bar."""
         self.status_dot.setStyleSheet("border-radius: 5px; background: #ef4444;")
         self.status_text.setText("DB error")
 
