@@ -20,6 +20,7 @@ class ReviewDecision(str, Enum):
     """Supported human review decisions."""
 
     APPROVE = "approve"
+    SAVE_CORRECTIONS = "save_corrections"
     APPROVE_WITH_CORRECTIONS = "approve_with_corrections"
     REJECT = "reject"
 

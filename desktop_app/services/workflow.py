@@ -182,7 +182,7 @@ class DesktopWorkflow:
                 invoice.reviewed_by = review.reviewer
                 invoice.reviewed_at = now
                 self.log(db, invoice.id, "HITL: Invoice APPROVED - status set to Approved", user=review.reviewer)
-            elif review.decision == ReviewDecision.APPROVE_WITH_CORRECTIONS:
+            elif review.decision in {ReviewDecision.SAVE_CORRECTIONS, ReviewDecision.APPROVE_WITH_CORRECTIONS}:
                 current_data = invoice_data_from_invoice(invoice) or InvoiceData()
                 current = current_data.model_dump(mode="json")
                 changed = []
@@ -197,10 +197,13 @@ class DesktopWorkflow:
                 document_kind = invoice.extraction.document_kind if invoice.extraction else None
                 mime_type = invoice.extraction.mime_type if invoice.extraction else None
                 persist_extraction(db, invoice, data, validation, raw_markdown, document_kind=document_kind, mime_type=mime_type)
-                invoice.status = InvoiceStatus.APPROVED
-                invoice.reviewed_by = review.reviewer
-                invoice.reviewed_at = now
-                self.log(db, invoice.id, f"HITL: Invoice APPROVED WITH CORRECTIONS - {len(changed)} field(s) changed", user=review.reviewer)
+                if review.decision == ReviewDecision.SAVE_CORRECTIONS:
+                    self.log(db, invoice.id, f"HITL: Corrections saved - {len(changed)} field(s) changed", user=review.reviewer)
+                else:
+                    invoice.status = InvoiceStatus.APPROVED
+                    invoice.reviewed_by = review.reviewer
+                    invoice.reviewed_at = now
+                    self.log(db, invoice.id, f"HITL: Invoice APPROVED WITH CORRECTIONS - {len(changed)} field(s) changed", user=review.reviewer)
             elif review.decision == ReviewDecision.REJECT:
                 reason = review.rejection_reason or "No reason provided"
                 invoice.status = InvoiceStatus.REJECTED

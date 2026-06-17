@@ -267,6 +267,114 @@ class DatabasePersistenceTests(unittest.TestCase):
             self.assertIn("<LEDGERNAME>Input IGST</LEDGERNAME>", xml)
             self.assertIn(f"<LEDGERNAME>{INPUT_CESS_LEDGER_NAME}</LEDGERNAME>", xml)
 
+    def test_save_corrections_updates_data_without_approving_invoice(self) -> None:
+        """Saving corrections should refresh extraction data while preserving review status."""
+        engine = self.make_engine()
+        Base.metadata.create_all(engine)
+        data = self.sample_invoice_data()
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = Invoice(filename="invoice.pdf", file_path="C:/tmp/invoice.pdf", status=InvoiceStatus.PENDING_REVIEW)
+            db.add(invoice)
+            db.flush()
+            persist_extraction(
+                db,
+                invoice,
+                data,
+                ValidationResult(is_valid=False, errors=["Old validation error"]),
+                "raw text",
+                document_kind="DIGITAL_PDF",
+                mime_type="application/pdf",
+            )
+            db.commit()
+            invoice_id = invoice.id
+
+        original_line = data.line_items[0].model_dump(mode="json")
+        edited_values = flatten_line_item_taxes(original_line)
+        edited_values["item_name"] = "Saved Clean Service"
+        edited_values["description"] = "Saved Service"
+        corrected_line = build_line_item_taxes(edited_values, original_item=original_line)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            workflow.submit_review(
+                invoice_id,
+                {
+                    "decision": "save_corrections",
+                    "reviewer": "reviewer",
+                    "corrections": {"line_items": [corrected_line]},
+                },
+            )
+
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = db.get(Invoice, invoice_id)
+            self.assertIsNotNone(invoice)
+            assert invoice is not None
+            loaded = invoice_data_from_invoice(invoice)
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(invoice.status, InvoiceStatus.PENDING_REVIEW)
+            self.assertIsNone(invoice.reviewed_by)
+            self.assertIsNone(invoice.reviewed_at)
+            self.assertEqual(loaded.line_items[0].item_name, "Saved Clean Service")
+            self.assertEqual(loaded.line_items[0].description, "Saved Service")
+            self.assertEqual(raw_markdown_from_invoice(invoice), "raw text")
+            self.assertEqual(invoice.extraction.document_kind, "DIGITAL_PDF")
+            self.assertEqual(invoice.extraction.mime_type, "application/pdf")
+            validation = validation_from_invoice(invoice)
+            self.assertFalse(any("Old validation error" in error for error in validation.errors))
+            logs = db.scalars(select(AuditLog).where(AuditLog.invoice_id == invoice_id)).all()
+            actions = [log.action for log in logs]
+            self.assertTrue(any("Corrections saved" in action for action in actions))
+            self.assertFalse(any("APPROVED" in action for action in actions))
+
+    def test_save_corrections_can_run_multiple_times(self) -> None:
+        """Reviewers should be able to save corrected extraction data repeatedly."""
+        engine = self.make_engine()
+        Base.metadata.create_all(engine)
+        data = self.sample_invoice_data()
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = Invoice(filename="invoice.pdf", file_path="C:/tmp/invoice.pdf", status=InvoiceStatus.PENDING_REVIEW)
+            db.add(invoice)
+            db.flush()
+            persist_extraction(db, invoice, data, validate_invoice(data), "raw text")
+            db.commit()
+            invoice_id = invoice.id
+
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+
+        def corrected_line(description: str) -> dict[str, Any]:
+            current_line = data.line_items[0].model_dump(mode="json")
+            values = flatten_line_item_taxes(current_line)
+            values["description"] = description
+            return build_line_item_taxes(values, original_item=current_line)
+
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            first = workflow.submit_review(
+                invoice_id,
+                {"decision": "save_corrections", "reviewer": "reviewer", "corrections": {"line_items": [corrected_line("First Save")]}},
+            )
+            second = workflow.submit_review(
+                invoice_id,
+                {"decision": "save_corrections", "reviewer": "reviewer", "corrections": {"line_items": [corrected_line("Second Save")]}},
+            )
+
+        self.assertEqual(first["status"], InvoiceStatus.PENDING_REVIEW)
+        self.assertEqual(first["extracted_data"]["line_items"][0]["description"], "First Save")
+        self.assertEqual(second["status"], InvoiceStatus.PENDING_REVIEW)
+        self.assertEqual(second["extracted_data"]["line_items"][0]["description"], "Second Save")
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = db.get(Invoice, invoice_id)
+            self.assertIsNotNone(invoice)
+            assert invoice is not None
+            loaded = invoice_data_from_invoice(invoice)
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(invoice.status, InvoiceStatus.PENDING_REVIEW)
+            self.assertEqual(loaded.line_items[0].description, "Second Save")
+            actions = [log.action for log in db.scalars(select(AuditLog).where(AuditLog.invoice_id == invoice_id)).all()]
+            self.assertEqual(sum("Corrections saved" in action for action in actions), 2)
+
     def create_legacy_schema(
         self,
         engine: Engine,

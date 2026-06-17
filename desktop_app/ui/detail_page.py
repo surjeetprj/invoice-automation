@@ -174,7 +174,7 @@ class MetadataForm(QWidget):
             edit.setMinimumWidth(150)
             if field in NUMERIC_FIELDS:
                 edit.setValidator(QDoubleValidator(bottom=-999999999.0, top=999999999.0, decimals=2))
-            edit.textChanged.connect(self.changed.emit)
+            edit.textChanged.connect(lambda _text, signal=self.changed: signal.emit())
             edit.textChanged.connect(self.update_required_state)
             self.fields[field] = edit
             self.labels[field] = label
