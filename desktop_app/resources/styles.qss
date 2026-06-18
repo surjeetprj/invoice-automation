@@ -151,6 +151,11 @@ QHeaderView::section {
     font-weight: 800;
 }
 
+#activityError {
+    color: #991b1b;
+    font-weight: 700;
+}
+
 #statusBar {
     min-height: 24px;
     max-height: 24px;
