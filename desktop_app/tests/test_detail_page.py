@@ -13,6 +13,8 @@ from PySide6.QtWidgets import QApplication
 from desktop_app.ui.constants import FIELD_GROUPS, LINE_COLUMNS, REQUIRED_METADATA_FIELDS
 from desktop_app.ui.detail_page import DetailPage
 from desktop_app.ui.main_window import MainWindow
+from desktop_app.ui.upload_page import UploadPage
+from desktop_app.ui.widgets.worker import Worker
 
 
 class DetailPageLayoutTests(unittest.TestCase):
@@ -236,6 +238,90 @@ class DetailPageLayoutTests(unittest.TestCase):
             finally:
                 window.close()
                 window.deleteLater()
+
+    def test_upload_page_status_replaces_processing_steps(self) -> None:
+        """Upload status should show only one latest processing message."""
+        page = UploadPage()
+        try:
+            page.set_busy(True, "Starting invoice processing...")
+            page.add_activity({"message": "Checking file type and size...", "level": "info"})
+            page.add_activity({"message": "Sending invoice content to Gemini...", "level": "info"})
+
+            self.assertFalse(page.drop_zone.isEnabled())
+            self.assertFalse(page.progress.isHidden())
+            self.assertEqual(page.status.text(), "Sending invoice content to Gemini...")
+            self.assertEqual(page.status.objectName(), "muted")
+
+            page.set_busy(True, "Starting another invoice...")
+            self.assertEqual(page.status.text(), "Starting another invoice...")
+
+            page.set_busy(False, "Upload complete.")
+            self.assertTrue(page.drop_zone.isEnabled())
+            self.assertTrue(page.progress.isHidden())
+            self.assertEqual(page.status.text(), "Upload complete.")
+        finally:
+            page.deleteLater()
+
+    def test_main_window_upload_progress_reaches_upload_page(self) -> None:
+        """Worker progress events should be routed into the upload activity feed."""
+
+        class FakeUpload:
+            def __init__(self) -> None:
+                self.busy_states = []
+                self.activities = []
+
+            def set_busy(self, busy, message=""):
+                self.busy_states.append((busy, message))
+
+            def add_activity(self, payload):
+                self.activities.append(payload)
+
+        class DummyWindow:
+            def __init__(self) -> None:
+                self.upload = FakeUpload()
+                self.workflow = self
+                self.opened_invoice_id = None
+
+            def upload_invoice(self, path, progress_callback=None):
+                progress_callback({"message": "Checking file type and size...", "level": "info"})
+                progress_callback({"message": "Invoice is ready for review.", "level": "info"})
+                return {"id": 42}
+
+            def run_task(self, task, callback, *args, on_error=None, on_progress=None):
+                result = task(*args, progress_callback=on_progress)
+                callback(result)
+
+            def open_invoice(self, invoice_id):
+                self.opened_invoice_id = invoice_id
+
+        window = DummyWindow()
+        MainWindow.upload_invoice(window, "invoice.pdf")
+
+        self.assertEqual(window.upload.busy_states[0], (True, "Starting invoice processing..."))
+        self.assertEqual(window.upload.busy_states[-1], (False, "Upload complete."))
+        self.assertEqual([event["message"] for event in window.upload.activities], [
+            "Checking file type and size...",
+            "Invoice is ready for review.",
+        ])
+        self.assertEqual(window.opened_invoice_id, 42)
+
+    def test_worker_emits_progress_events_from_callback(self) -> None:
+        """A callback-aware worker task should emit progress events before completion."""
+        progress_events = []
+        completed = []
+
+        def task(progress_callback=None):
+            progress_callback({"message": "Working...", "level": "info"})
+            return "done"
+
+        worker = Worker(task, progress_callback_name="progress_callback")
+        worker.signals.progress.connect(progress_events.append)
+        worker.signals.completed.connect(completed.append)
+        worker.run()
+
+        self.assertEqual(progress_events, [{"message": "Working...", "level": "info"}])
+        self.assertTrue(completed[0].success)
+        self.assertEqual(completed[0].result, "done")
 
 
 if __name__ == "__main__":
