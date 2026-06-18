@@ -162,9 +162,10 @@ class MainWindow(QMainWindow):
         on_success: Callable[[Any], None],
         *args: Any,
         on_error: Callable[[str], None] | None = None,
+        on_progress: Callable[[Any], None] | None = None,
     ) -> None:
         """Run a blocking callable on the Qt worker pool with structured errors."""
-        worker = Worker(fn, *args)
+        worker = Worker(fn, *args, progress_callback_name="progress_callback" if on_progress else None)
         self.active_workers.add(worker)
 
         def completed(result: WorkerResult) -> None:
@@ -181,6 +182,8 @@ class MainWindow(QMainWindow):
             handler(result.error_message or "Unknown desktop task error.")
 
         worker.signals.completed.connect(completed)
+        if on_progress:
+            worker.signals.progress.connect(on_progress)
         worker.signals.finished.connect(lambda w=worker: self.active_workers.discard(w))
         self.thread_pool.start(worker)
 
@@ -209,17 +212,23 @@ class MainWindow(QMainWindow):
 
     def upload_invoice(self, path: str) -> None:
         """Start invoice validation, extraction, parsing, and persistence."""
-        self.upload.set_busy(True, "Validating document and processing invoice...")
+        self.upload.set_busy(True, "Starting invoice processing...")
 
         def done(invoice: dict[str, Any]) -> None:
             self.upload.set_busy(False, "Upload complete.")
             self.open_invoice(int(invoice["id"]))
 
+        def failed(err: str) -> None:
+            self.upload.add_activity({"message": f"Processing failed: {err}", "level": "error"})
+            self.upload.set_busy(False, "Processing failed.")
+            self.show_error(err)
+
         self.run_task(
             self.workflow.upload_invoice,
             done,
             path,
-            on_error=lambda err: (self.upload.set_busy(False, ""), self.show_error(err)),
+            on_error=failed,
+            on_progress=self.upload.add_activity,
         )
 
     def open_invoice(self, invoice_id: int) -> None:
