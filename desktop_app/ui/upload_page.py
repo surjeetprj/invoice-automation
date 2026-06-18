@@ -27,6 +27,7 @@ class UploadPage(QWidget):
         self.progress.hide()
         self.status = QLabel("")
         self.status.setObjectName("muted")
+        self.status.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(self.drop_zone, stretch=1)
         layout.addWidget(self.progress)
@@ -35,5 +36,32 @@ class UploadPage(QWidget):
     def set_busy(self, busy: bool, message: str = "") -> None:
         """Toggle upload progress state and status text."""
         self.progress.setVisible(busy)
-        self.status.setText(message)
         self.drop_zone.setEnabled(not busy)
+        if busy:
+            if message:
+                self.set_activity(message)
+        else:
+            self.set_status_message(message)
+
+    def set_status_message(self, message: str, *, level: str = "info") -> None:
+        """Show one upload status message."""
+        self.status.setText(message)
+        self.status.setObjectName("activityError" if level == "error" else "muted")
+        self.status.style().unpolish(self.status)
+        self.status.style().polish(self.status)
+
+    def set_activity(self, payload: object) -> None:
+        """Show the latest transient processing message."""
+        if isinstance(payload, dict):
+            message = str(payload.get("message") or "").strip()
+            level = str(payload.get("level") or "info").strip().lower()
+        else:
+            message = str(payload or "").strip()
+            level = "info"
+        if not message:
+            return
+        self.set_status_message(message, level=level)
+
+    def add_activity(self, payload: object) -> None:
+        """Compatibility wrapper for progress callbacks."""
+        self.set_activity(payload)
