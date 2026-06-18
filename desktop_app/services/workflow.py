@@ -8,7 +8,7 @@ import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy import func, select
 
@@ -39,6 +39,7 @@ from .tally import TallyClient
 from ..domain.validation import calculate_confidence_score, validate_invoice
 
 logger = logging.getLogger(__name__)
+ProgressCallback = Callable[[dict[str, str]], None]
 
 
 class DesktopWorkflow:
@@ -117,13 +118,16 @@ class DesktopWorkflow:
         """Return the local source document path for older UI callers."""
         return self.get_document_path(invoice_id)
 
-    def upload_invoice(self, source_path: str | Path) -> dict[str, Any]:
+    def upload_invoice(self, source_path: str | Path, progress_callback: ProgressCallback | None = None) -> dict[str, Any]:
         """Copy, process, persist, and return a newly uploaded invoice."""
         self.initialize()
         source = Path(source_path)
         logger.info("Upload requested: %s", source)
+        self.progress(progress_callback, "Checking file type and size...")
         validate_upload_file(source)
+        self.progress(progress_callback, "Computing invoice fingerprint...")
         file_hash = sha256_file(source)
+        self.progress(progress_callback, "Copying invoice into local workspace...")
         target = self.unique_upload_path(source.name)
         shutil.copy2(source, target)
 
@@ -132,23 +136,28 @@ class DesktopWorkflow:
             db.add(invoice)
             db.commit()
             db.refresh(invoice)
+            self.progress(progress_callback, f"Created local invoice record #{invoice.id}.")
             self.log(db, invoice.id, "Invoice uploaded", reason=f"File: {source.name}")
             if DUPLICATE_CHECK_ENABLED:
+                self.progress(progress_callback, "Checking for duplicate invoice content...")
                 duplicate = db.scalar(
                     select(Invoice.id).where(Invoice.file_hash == file_hash, Invoice.id != invoice.id)
                 )
                 if duplicate:
+                    self.progress(progress_callback, f"Duplicate content detected. It matches invoice #{duplicate}.", level="warning")
                     self.log(db, invoice.id, f"WARNING: Duplicate file content detected (matches invoice #{duplicate})")
             try:
-                self.run_pipeline(db, invoice, target)
+                self.run_pipeline(db, invoice, target, progress_callback=progress_callback)
             except ScannedDocumentException as exc:
                 invoice.status = InvoiceStatus.PENDING_REVIEW
                 db.commit()
+                self.progress(progress_callback, f"Document route warning: {exc}", level="warning")
                 self.log(db, invoice.id, f"Pipeline extraction route error: {exc}")
             except Exception as exc:
                 logger.exception("Pipeline error for invoice %s", invoice.id)
                 invoice.status = InvoiceStatus.PENDING_REVIEW
                 db.commit()
+                self.progress(progress_callback, f"Processing failed: {exc}", level="error")
                 self.log(db, invoice.id, f"Pipeline error: {exc}")
             db.refresh(invoice)
             return self.invoice_to_record(invoice).model_dump(mode="json")
@@ -427,20 +436,24 @@ class DesktopWorkflow:
                 self.log(db, invoice_id, f"TallyPrime purchase/GST ledgers synced: {response.summary}")
             return {"success": True, "message": "Purchase and GST ledgers synced to TallyPrime.", "tally_response": response.summary}
 
-    def run_pipeline(self, db, invoice: Invoice, file_path: Path) -> None:
+    def run_pipeline(self, db, invoice: Invoice, file_path: Path, progress_callback: ProgressCallback | None = None) -> None:
         """Execute extraction, AI parsing, validation, and persistence."""
         start = time.perf_counter()
         logger.info("Pipeline started for invoice #%s: %s", invoice.id, file_path)
+        self.progress(progress_callback, "Starting extraction pipeline...")
         invoice.status = InvoiceStatus.IN_PROCESS
         db.commit()
         self.log(db, invoice.id, "Status set to In_Process")
 
+        self.progress(progress_callback, "Classifying invoice document type...")
         source = classify_document(file_path)
+        self.progress(progress_callback, f"{document_kind_label(source.document_kind)} detected.")
         self.log(db, invoice.id, f"Document classified as {source.document_kind.value}", reason=source.mime_type)
 
         raw_markdown = None
         try:
             if source.document_kind == DocumentKind.DIGITAL_PDF:
+                self.progress(progress_callback, "Digital PDF detected. Extracting text and tables...")
                 extraction_start = time.perf_counter()
                 raw_markdown = extract_invoice_source_text(source)
                 extraction_time_ms = int((time.perf_counter() - extraction_start) * 1000)
@@ -452,6 +465,7 @@ class DesktopWorkflow:
                 )
                 self.log(db, invoice.id, f"PDF extraction complete in {extraction_time_ms}ms - {len(raw_markdown or '')} chars")
                 logger.info("AI parsing started for invoice #%s", invoice.id)
+                self.progress(progress_callback, "Sending invoice text to Gemini for structured extraction...")
                 ai_start = time.perf_counter()
                 parsed = parse_invoice(raw_markdown, vendor_hint=invoice.filename)
             else:
@@ -459,14 +473,18 @@ class DesktopWorkflow:
                 self.log(db, invoice.id, f"Visual AI parsing route used - {source.document_kind.value}")
                 raw_markdown = None
                 logger.info("AI parsing started for invoice #%s", invoice.id)
+                self.progress(progress_callback, "Preparing visual invoice for Gemini multimodal extraction...")
                 ai_start = time.perf_counter()
                 parsed = parse_invoice_file(source.path, source.mime_type, invoice.filename, document_kind=source.document_kind.value)
             ai_time_ms = int((time.perf_counter() - ai_start) * 1000)
             logger.info("AI parsing finished for invoice #%s in %sms", invoice.id, ai_time_ms)
+            self.progress(progress_callback, "Reading AI response and normalizing invoice fields...")
             data = InvoiceData(**parsed)
+            self.progress(progress_callback, "Validating GST, totals, and line items...")
             validation = validate_invoice(data, raw_markdown)
         except AIRateLimitError as exc:
             logger.warning("AI quota/rate limit for invoice #%s: %s", invoice.id, exc)
+            self.progress(progress_callback, f"Gemini quota or rate limit reached: {exc}", level="warning")
             data = InvoiceData(vendor_name=invoice.filename)
             validation = ValidationResult(
                 is_valid=False,
@@ -477,6 +495,7 @@ class DesktopWorkflow:
             self.log(db, invoice.id, f"AI quota/rate limit: {exc}")
         except Exception as exc:
             logger.exception("AI parsing failed for invoice #%s", invoice.id)
+            self.progress(progress_callback, f"AI parsing failed: {exc}", level="error")
             data = InvoiceData(vendor_name=invoice.filename)
             validation = ValidationResult(
                 is_valid=False,
@@ -488,6 +507,7 @@ class DesktopWorkflow:
         confidence = calculate_confidence_score(data, validation)
         data.confidence_score = confidence
 
+        self.progress(progress_callback, "Saving extracted data, validation results, and audit logs...")
         persist_extraction(
             db,
             invoice,
@@ -502,6 +522,7 @@ class DesktopWorkflow:
         db.commit()
         logger.info("Pipeline complete for invoice #%s in %sms", invoice.id, invoice.processing_time_ms)
         self.log(db, invoice.id, f"Pipeline complete in {invoice.processing_time_ms}ms - status set to Pending_Review")
+        self.progress(progress_callback, "Invoice is ready for review.")
 
     def invoice_to_record(self, invoice: Invoice) -> InvoiceRecord:
         """Convert an ORM invoice into a display-ready Pydantic record."""
@@ -539,6 +560,11 @@ class DesktopWorkflow:
         db.add(AuditLog(invoice_id=invoice_id, user=user, action=action, reason=reason))
         db.commit()
 
+    def progress(self, callback: ProgressCallback | None, message: str, *, level: str = "info") -> None:
+        """Emit one optional user-facing processing progress event."""
+        if callback:
+            callback({"message": message, "level": level})
+
     def unique_upload_path(self, filename: str) -> Path:
         """Return a non-conflicting path inside the uploads directory."""
         target = UPLOAD_DIR / filename
@@ -561,3 +587,13 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def document_kind_label(kind: DocumentKind) -> str:
+    """Return a user-friendly document classification label."""
+    labels = {
+        DocumentKind.DIGITAL_PDF: "Digital PDF",
+        DocumentKind.SCANNED_PDF: "Scanned PDF",
+        DocumentKind.IMAGE: "Image invoice",
+    }
+    return labels.get(kind, kind.value.replace("_", " ").title())
