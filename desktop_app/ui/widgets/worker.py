@@ -23,6 +23,7 @@ class WorkerResult:
 class WorkerSignals(QObject):
     """Qt signals emitted by a background worker."""
 
+    progress = Signal(object)
     completed = Signal(object)
     finished = Signal()
 
@@ -30,13 +31,21 @@ class WorkerSignals(QObject):
 class Worker(QRunnable):
     """Run a blocking callable on Qt's thread pool and emit a WorkerResult."""
 
-    def __init__(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        fn: Callable[..., Any],
+        *args: Any,
+        progress_callback_name: str | None = None,
+        **kwargs: Any,
+    ) -> None:
         """Store the callable and arguments for later background execution."""
         super().__init__()
         self.fn = fn
         self.args = args
         self.kwargs = kwargs
         self.signals = WorkerSignals()
+        if progress_callback_name:
+            self.kwargs[progress_callback_name] = self.signals.progress.emit
 
     @Slot()
     def run(self) -> None:
