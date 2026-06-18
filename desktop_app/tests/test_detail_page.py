@@ -244,8 +244,8 @@ class DetailPageLayoutTests(unittest.TestCase):
         page = UploadPage()
         try:
             page.set_busy(True, "Starting invoice processing...")
-            page.add_activity({"message": "Checking file type and size...", "level": "info"})
-            page.add_activity({"message": "Sending invoice content to Gemini...", "level": "info"})
+            page.set_activity({"message": "Checking file type and size...", "level": "info"})
+            page.set_activity({"message": "Sending invoice content to Gemini...", "level": "info"})
 
             self.assertFalse(page.drop_zone.isEnabled())
             self.assertFalse(page.progress.isHidden())
@@ -263,18 +263,18 @@ class DetailPageLayoutTests(unittest.TestCase):
             page.deleteLater()
 
     def test_main_window_upload_progress_reaches_upload_page(self) -> None:
-        """Worker progress events should be routed into the upload activity feed."""
+        """Worker progress events should update the upload status message."""
 
         class FakeUpload:
             def __init__(self) -> None:
                 self.busy_states = []
-                self.activities = []
+                self.status_messages = []
 
             def set_busy(self, busy, message=""):
                 self.busy_states.append((busy, message))
 
-            def add_activity(self, payload):
-                self.activities.append(payload)
+            def set_activity(self, payload):
+                self.status_messages.append(payload)
 
         class DummyWindow:
             def __init__(self) -> None:
@@ -299,7 +299,7 @@ class DetailPageLayoutTests(unittest.TestCase):
 
         self.assertEqual(window.upload.busy_states[0], (True, "Starting invoice processing..."))
         self.assertEqual(window.upload.busy_states[-1], (False, "Upload complete."))
-        self.assertEqual([event["message"] for event in window.upload.activities], [
+        self.assertEqual([event["message"] for event in window.upload.status_messages], [
             "Checking file type and size...",
             "Invoice is ready for review.",
         ])

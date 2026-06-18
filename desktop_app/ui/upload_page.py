@@ -61,7 +61,3 @@ class UploadPage(QWidget):
         if not message:
             return
         self.set_status_message(message, level=level)
-
-    def add_activity(self, payload: object) -> None:
-        """Compatibility wrapper for progress callbacks."""
-        self.set_activity(payload)

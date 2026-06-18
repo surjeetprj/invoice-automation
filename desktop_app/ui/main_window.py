@@ -219,7 +219,7 @@ class MainWindow(QMainWindow):
             self.open_invoice(int(invoice["id"]))
 
         def failed(err: str) -> None:
-            self.upload.add_activity({"message": f"Processing failed: {err}", "level": "error"})
+            self.upload.set_activity({"message": f"Processing failed: {err}", "level": "error"})
             self.upload.set_busy(False, "Processing failed.")
             self.show_error(err)
 
@@ -228,7 +228,7 @@ class MainWindow(QMainWindow):
             done,
             path,
             on_error=failed,
-            on_progress=self.upload.add_activity,
+            on_progress=self.upload.set_activity,
         )
 
     def open_invoice(self, invoice_id: int) -> None:
