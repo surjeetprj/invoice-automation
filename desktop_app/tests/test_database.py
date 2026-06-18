@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 from unittest.mock import patch
 
@@ -179,6 +180,49 @@ class DatabasePersistenceTests(unittest.TestCase):
             self.assertIn("quota", validation.errors[0].lower())
             messages = [log.action for log in invoice.audit_logs]
             self.assertTrue(any(message.startswith("AI quota/rate limit") for message in messages))
+
+    def test_upload_invoice_emits_user_facing_progress_messages(self) -> None:
+        """Upload processing should report friendly high-level progress messages."""
+        engine = self.make_engine()
+        Base.metadata.create_all(engine)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        progress_events: list[dict[str, str]] = []
+
+        with TemporaryDirectory() as temp_dir:
+            source_path = Path(temp_dir) / "invoice.pdf"
+            target_path = Path(temp_dir) / "uploaded.pdf"
+            source_path.write_bytes(b"%PDF-1.4 fake invoice")
+            source = InvoiceSource(path=target_path, document_kind=DocumentKind.DIGITAL_PDF, mime_type="application/pdf")
+
+            with (
+                patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)),
+                patch.object(workflow, "unique_upload_path", return_value=target_path),
+                patch("desktop_app.services.workflow.classify_document", return_value=source),
+                patch("desktop_app.services.workflow.extract_invoice_source_text", return_value="raw invoice text"),
+                patch(
+                    "desktop_app.services.workflow.parse_invoice",
+                    return_value={
+                        "invoice_number": "INV-PROGRESS",
+                        "date": "01-05-2026",
+                        "vendor_name": "Vendor Pvt Ltd",
+                        "line_items": [{"description": "Service", "taxable_value": 100.0}],
+                        "total_taxable_amount": 100.0,
+                        "total_amount": 100.0,
+                    },
+                ),
+            ):
+                invoice = workflow.upload_invoice(source_path, progress_callback=progress_events.append)
+
+        messages = [event["message"] for event in progress_events]
+        self.assertEqual(invoice["status"], InvoiceStatus.PENDING_REVIEW)
+        self.assertIn("Checking file type and size...", messages)
+        self.assertIn("Copying invoice into local workspace...", messages)
+        self.assertIn("Classifying invoice document type...", messages)
+        self.assertIn("Digital PDF detected. Extracting text and tables...", messages)
+        self.assertIn("Sending invoice text to Gemini for structured extraction...", messages)
+        self.assertIn("Validating GST, totals, and line items...", messages)
+        self.assertEqual(messages[-1], "Invoice is ready for review.")
 
     def test_approve_with_corrections_preserves_nested_line_taxes_for_validation_and_export(self) -> None:
         """Review-table corrections should not drop nested tax rows hidden from the grid."""
