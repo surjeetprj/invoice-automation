@@ -190,6 +190,49 @@ class DetailPageLayoutTests(unittest.TestCase):
         finally:
             page.deleteLater()
 
+    def test_loading_many_line_items_does_not_recurse_during_validation(self) -> None:
+        """Line-item validation should not emit recursive dirty-state updates while loading."""
+        page = DetailPage()
+        try:
+            line_items = [
+                {
+                    "sr_no": index,
+                    "item_name": f"Item {index}",
+                    "description": f"Item {index}",
+                    "quantity": 10.0,
+                    "unit": "PCS",
+                    "rate": 5.0,
+                    "discount": 0.0,
+                    "taxable_value": 50.0,
+                    "taxes": [{"tax_type": "IGST", "tax_rate": 12.0, "taxable_amount": 50.0, "tax_amount": 6.0}],
+                    "cess_amount": 0.0,
+                    "total": 56.0,
+                }
+                for index in range(1, 11)
+            ]
+            page.load_invoice(
+                {
+                    "id": 4,
+                    "status": "Pending_Review",
+                    "confidence_score": 1.0,
+                    "extracted_data": {
+                        "invoice_number": "INV-4",
+                        "date": "01-04-2026",
+                        "vendor_name": "Vendor A",
+                        "total_taxable_amount": 500.0,
+                        "total_amount": 560.0,
+                        "line_items": line_items,
+                    },
+                    "validation": {"is_valid": True, "errors": [], "warnings": [], "issues": []},
+                }
+            )
+
+            self.assertEqual(page.line_items.table.rowCount(), 10)
+            self.assertFalse(page.dirty)
+            self.assertFalse(page.corrections_btn.isEnabled())
+            self.assertTrue(page.approve_btn.isEnabled())
+        finally:
+            page.deleteLater()
     def test_main_window_uses_top_bar_navigation(self) -> None:
         """The app shell should use a top bar instead of the old sidebar splitter."""
 

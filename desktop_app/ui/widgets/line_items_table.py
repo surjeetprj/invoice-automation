@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from PySide6.QtCore import QModelIndex, Qt, Signal
+from PySide6.QtCore import QModelIndex, QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QColor, QDoubleValidator, QIntValidator
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
@@ -157,10 +157,18 @@ class LineItemsTable(QWidget):
         try:
             cast_line_field(name, item.text().strip())
         except ValueError:
-            item.setBackground(INVALID_CELL_COLOR)
+            self.set_validation_background(item, INVALID_CELL_COLOR)
             return False
-        item.setBackground(VALID_CELL_COLOR)
+        self.set_validation_background(item, VALID_CELL_COLOR)
         return True
+
+    def set_validation_background(self, item: QTableWidgetItem, color: QColor) -> None:
+        """Mark validation state without emitting itemChanged recursively."""
+        blocker = QSignalBlocker(self.table)
+        try:
+            item.setBackground(color)
+        finally:
+            del blocker
 
     def row_values(self, row: int) -> dict[str, Any]:
         """Return one table row as a typed line item dictionary."""

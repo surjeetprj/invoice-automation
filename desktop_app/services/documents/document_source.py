@@ -96,8 +96,6 @@ def classify_pdf(file_path: str | Path) -> DocumentKind:
         if selectable_text_length(path) >= MIN_DIGITAL_TEXT_CHARS:
             return DocumentKind.DIGITAL_PDF
         return DocumentKind.SCANNED_PDF
-    except PdfReadError as exc:
-        raise ValueError("The PDF appears to be encrypted, corrupted, or unreadable.") from exc
     except Exception as exc:
         logger.warning("Could not classify PDF %s: %s", path.name, exc)
         return DocumentKind.SCANNED_PDF
@@ -121,10 +119,8 @@ def first_page_is_image_heavy(path: Path) -> bool:
 
 def selectable_text_length(path: Path, max_pages: int = 2) -> int:
     """Return selectable text length from the first few PDF pages."""
-    from pypdf import PdfReader
-
-    reader = PdfReader(path)
     text = ""
-    for index in range(min(max_pages, len(reader.pages))):
-        text += (reader.pages[index].extract_text() or "").strip()
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages[:max_pages]:
+            text += (page.extract_text() or "").strip()
     return len(text)
