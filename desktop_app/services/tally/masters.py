@@ -371,8 +371,8 @@ def add_stock_item_gst_details(item: Element, master: TallyMaster) -> None:
         rate_details = SubElement(statewise, "RATEDETAILS.LIST")
         add_text(rate_details, "GSTRATEDUTYHEAD", duty_head)
         add_text(rate_details, "GSTRATEVALUATIONTYPE", "Based on Value" if rate > 0 else TALLY_NOT_APPLICABLE)
-        if rate > 0:
-            add_text(rate_details, "GSTRATE", f"{rate:g}")
+        add_text(rate_details, "GSTRATE", f"{rate:g}" if rate > 0 else "0")
+        add_text(rate_details, "GSTRATEPERUNIT", "0")
     SubElement(details, "TEMPGSTITEMSLABRATES.LIST")
     SubElement(details, "TEMPGSTDETAILSLABRATES.LIST")
 
@@ -525,7 +525,12 @@ def stock_item_gst_rates(item, data: InvoiceData) -> tuple[tuple[str, float], ..
             if amount > 0:
                 rates[tax_type] = round((amount / data.total_taxable_amount) * 100, 2)
     ordered: list[tuple[str, float]] = []
-    for tax_type in ("CGST", "SGST", "IGST", "CESS"):
+    cgst_rate = rates.get("CGST", 0.0)
+    sgst_rate = rates.get("SGST", 0.0)
+    igst_rate = rates.get("IGST", 0.0) or (cgst_rate + sgst_rate)
+    if igst_rate > 0:
+        ordered.append((tally_tax_type_label("IGST"), igst_rate))
+    for tax_type in ("CGST", "SGST", "CESS"):
         if tax_type in rates:
             ordered.append((tally_tax_type_label(tax_type), rates[tax_type]))
     ordered.append(("State Cess", 0.0))

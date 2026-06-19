@@ -11,6 +11,7 @@ from ...domain.schemas import InvoiceData, SupplyType
 from ..exports.exporters import tally_tax_ledgers, tax_components_for_item
 from .masters import (
     PURCHASE_VOUCHER_TYPE,
+    TALLY_NOT_APPLICABLE,
     add_text,
     address_lines,
     normalize_unit_name,
@@ -107,8 +108,13 @@ def build_inventory_purchase_voucher_xml(invoice_id: int, data: InvoiceData) -> 
         for duty_head, rate in item_gst_rate_details(item, data):
             rate_details = SubElement(inventory_entry, "RATEDETAILS.LIST")
             add_text(rate_details, "GSTRATEDUTYHEAD", duty_head)
-            add_text(rate_details, "GSTRATEVALUATIONTYPE", "Based on Value")
-            add_text(rate_details, "GSTRATE", f"{rate:.2f}")
+            if rate > 0:
+                add_text(rate_details, "GSTRATEVALUATIONTYPE", "Based on Value")
+                add_text(rate_details, "GSTRATE", f"{rate:g}")
+            elif duty_head == "Cess":
+                add_text(rate_details, "GSTRATEVALUATIONTYPE", TALLY_NOT_APPLICABLE)
+            else:
+                add_text(rate_details, "GSTRATEVALUATIONTYPE", "Based on Value")
     add_item_party_ledger_entry(voucher, data, invoice_id)
     for name, amount in tally_tax_ledgers(data):
         if amount > 0:
@@ -366,9 +372,55 @@ def item_supply_type(item) -> str:
 
 
 def item_gst_rate_details(item, data: InvoiceData) -> list[tuple[str, float]]:
-    """Return GST rates for one inventory line, falling back to invoice-level rates."""
+    """Return Tally item-invoice GST rate rows for one inventory line.
+
+    TallyPrime exports manually corrected item vouchers with internal tax labels
+    such as ``CGST`` and ``SGST/UTGST`` in ``ALLINVENTORYENTRIES.LIST``. For
+    intra-state CGST/SGST rows it also stores the equivalent combined IGST rate.
+    Mirroring that shape lets Tally show the item tax rate in voucher alteration.
+    """
     components = tax_components_for_item(item)
-    rates = [(duty_head_name(tax_type), values["rate"]) for tax_type, values in components.items() if values["rate"] > 0]
-    if rates:
-        return rates
-    return gst_rate_details(data)
+    rates = {tax_type.upper(): values["rate"] for tax_type, values in components.items() if values["rate"] > 0}
+    if not rates:
+        rates = {
+            duty_head_to_tax_type(duty_head): rate
+            for duty_head, rate in gst_rate_details(data)
+            if rate > 0
+        }
+    return tally_item_rate_rows(rates)
+
+
+def tally_item_rate_rows(rates: dict[str, float]) -> list[tuple[str, float]]:
+    """Return Tally's expected inventory ``RATEDETAILS.LIST`` rows."""
+    cgst_rate = rates.get("CGST", 0.0)
+    sgst_rate = rates.get("SGST", 0.0)
+    igst_rate = rates.get("IGST", 0.0)
+    cess_rate = rates.get("CESS", 0.0)
+    combined_gst_rate = igst_rate or (cgst_rate + sgst_rate)
+
+    rows: list[tuple[str, float]] = []
+    if sgst_rate > 0:
+        rows.append(("State Tax", sgst_rate))
+    if cgst_rate > 0:
+        rows.append(("CGST", cgst_rate))
+    if sgst_rate > 0:
+        rows.append(("SGST/UTGST", sgst_rate))
+    if combined_gst_rate > 0:
+        rows.append(("IGST", combined_gst_rate))
+    rows.append(("Cess", cess_rate))
+    rows.append(("State Cess", 0.0))
+    return rows
+
+
+def duty_head_to_tax_type(duty_head: str) -> str:
+    """Map existing duty-head labels back to GST component codes."""
+    normalized = duty_head.strip().upper()
+    if normalized in {"CENTRAL TAX", "CGST"}:
+        return "CGST"
+    if normalized in {"STATE TAX", "SGST/UTGST", "SGST"}:
+        return "SGST"
+    if normalized in {"INTEGRATED TAX", "IGST"}:
+        return "IGST"
+    if normalized == "CESS":
+        return "CESS"
+    return normalized

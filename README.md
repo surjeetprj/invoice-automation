@@ -101,6 +101,51 @@ name while preserving the full invoice description separately. It can create
 required units, stock groups, and stock items, and it blocks before posting when
 reviewed item data is incomplete.
 
+Direct TallyPrime posting and Tally master sync also require a signed InvoiceAI
+license file whose allowed TallyPrime serial list matches the connected local
+TallyPrime installation. Configure `INVOICEAI_LICENSE_FILE` when the license
+file is not stored at the default app-data path. Some TallyPrime installations
+do not expose the serial number through the default HTTP/XML response; in that
+case set `TALLY_SERIAL_NUMBER` in `desktop_app\.env` to the same serial used in
+the signed license.
+
+## License Key Generation
+
+Do not manually choose or type a private key. Generate an Ed25519 key pair with
+a cryptographic random generator:
+
+```powershell
+cd C:\Users\surje\Documents\invoice_automation
+
+.\.venv\Scripts\python.exe -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey; from cryptography.hazmat.primitives import serialization; key=Ed25519PrivateKey.generate(); print('PRIVATE_KEY_HEX=' + key.private_bytes(encoding=serialization.Encoding.Raw, format=serialization.PrivateFormat.Raw, encryption_algorithm=serialization.NoEncryption()).hex()); print('PUBLIC_KEY_HEX=' + key.public_key().public_bytes(encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw).hex())"
+```
+
+Keep `PRIVATE_KEY_HEX` secret and never commit it. Replace `PUBLIC_KEY_HEX` in
+`desktop_app/services/licensing.py` before building a customer release.
+
+Use the private key only to generate signed customer license files:
+
+```powershell
+$env:INVOICEAI_LICENSE_PRIVATE_KEY_HEX="your-private-key-hex"
+
+.\.venv\Scripts\python.exe desktop_app\tools\sign_license.py `
+  --customer "Customer Name" `
+  --serial "TALLY-SERIAL-NUMBER" `
+  --output "invoiceai_license.json"
+```
+
+Place `invoiceai_license.json` at the default app runtime location on the customer machine:
+
+```text
+C:\Users\<WindowsUser>\AppData\Local\InvoiceAI\invoiceai_license.json
+```
+
+Alternatively, store it anywhere safe and set `INVOICEAI_LICENSE_FILE` in
+`desktop_app\.env` to the full file path.
+
+Share only `invoiceai_license.json` with the customer. If the private key leaks,
+rotate the key pair and ship a new app build with the new public key.
+
 ## Developer Context
 
 For architecture and safe-codebase context, see:

@@ -13,7 +13,7 @@ from desktop_app.db.models import AuditLog, Base, Invoice
 from desktop_app.db.repository import persist_extraction
 from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail, ValidationResult
 from desktop_app.services.tally import TallyClient
-from desktop_app.services.tally.client import TallyPreflight, annotate_tally_response, merge_tally_responses
+from desktop_app.services.tally.client import TallyPreflight, annotate_tally_response, build_tally_identity_xml, merge_tally_responses, parse_tally_serial_number
 from desktop_app.services.tally.masters import (
     build_inventory_stock_items_xml,
     TallyMaster,
@@ -29,6 +29,14 @@ from desktop_app.services.workflow import DesktopWorkflow
 
 class TallyServiceTests(unittest.TestCase):
     """Exercise XML builders, response parsing, and workflow posting."""
+
+    def setUp(self) -> None:
+        """Keep existing posting tests focused on Tally behavior, not licensing."""
+        self.license_patch = patch("desktop_app.services.workflow.assert_tally_serial_allowed")
+        self.license_check = self.license_patch.start()
+
+    def tearDown(self) -> None:
+        self.license_patch.stop()
 
     def sample_invoice_data(self) -> InvoiceData:
         """Return a purchase invoice with GST totals."""
@@ -98,6 +106,32 @@ class TallyServiceTests(unittest.TestCase):
         self.assertFalse(malformed.success)
         self.assertEqual(malformed.errors, 1)
 
+    def test_tally_client_parses_serial_number_from_identity_response(self) -> None:
+        """Tally identity XML responses should expose license serial fields."""
+        xml = """
+        <ENVELOPE><BODY><DATA><COLLECTION>
+          <COMPANY><NAME>Demo</NAME><LICENSESERIALNUMBER>TALLY-12345</LICENSESERIALNUMBER></COMPANY>
+        </COLLECTION></DATA></BODY></ENVELOPE>
+        """
+        self.assertEqual(parse_tally_serial_number(xml), "TALLY-12345")
+        self.assertEqual(parse_tally_serial_number("<COMPANY><LICENSESERIALNUMBER>Serial Number TALLY-67890</LICENSESERIALNUMBER></COMPANY>"), "TALLY-67890")
+        self.assertIn(b"InvoiceAITallyIdentity", build_tally_identity_xml())
+
+    def test_tally_client_uses_configured_serial_when_tally_does_not_expose_one(self) -> None:
+        """Configured serial fallback should keep Tally exports usable when HTTP omits serial fields."""
+        client = TallyClient()
+        with patch("desktop_app.services.tally.client.TALLY_SERIAL_NUMBER", "TALLY-12345"):
+            with patch.object(client, "post_xml", return_value="<ENVELOPE><COMPANY><NAME>Demo</NAME></COMPANY></ENVELOPE>"):
+                self.assertEqual(client.fetch_tally_serial_number(), "TALLY-12345")
+
+    def test_tally_client_fails_closed_when_serial_missing(self) -> None:
+        """Missing serial fields should block TallyPrime export when no fallback is configured."""
+        client = TallyClient()
+        with patch("desktop_app.services.tally.client.TALLY_SERIAL_NUMBER", ""):
+            with patch.object(client, "post_xml", return_value="<ENVELOPE><COMPANY><NAME>Demo</NAME></COMPANY></ENVELOPE>"):
+                with self.assertRaisesRegex(ConnectionError, "TALLY_SERIAL_NUMBER is not configured"):
+                    client.fetch_tally_serial_number()
+
     def test_master_xml_includes_vendor_purchase_and_tax_ledgers(self) -> None:
         """Master XML should create controlled ledgers under the right parents."""
         masters = required_purchase_masters(self.sample_invoice_data())
@@ -151,9 +185,12 @@ class TallyServiceTests(unittest.TestCase):
         self.assertIn("<DESCRIPTION>Consulting Service</DESCRIPTION>", xml)
         self.assertIn("<SRCOFGSTDETAILS>Specify Details Here</SRCOFGSTDETAILS>", xml)
         self.assertIn("<STATENAME>\x04 Any</STATENAME>", xml)
+        self.assertIn("<GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>", xml)
         self.assertIn("<GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>", xml)
         self.assertIn("<GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>", xml)
+        self.assertIn("<GSTRATE>18</GSTRATE>", xml)
         self.assertIn("<GSTRATE>9</GSTRATE>", xml)
+        self.assertIn("<GSTRATEPERUNIT>0</GSTRATEPERUNIT>", xml)
 
     def test_inventory_required_masters_include_stock_group_before_stock_items(self) -> None:
         """Item posting should create the stock group before dependent stock items."""
@@ -187,6 +224,13 @@ class TallyServiceTests(unittest.TestCase):
         self.assertIn("<HSNDETAILS.LIST>", xml)
         self.assertIn("<SRCOFHSNDETAILS>Specify Details Here</SRCOFHSNDETAILS>", xml)
         self.assertIn("<SRCOFGSTDETAILS>Specify Details Here</SRCOFGSTDETAILS>", xml)
+        self.assertIn("<GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>", xml)
+        self.assertIn("<GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>", xml)
+        self.assertIn("<GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>", xml)
+        self.assertIn("<GSTRATEDUTYHEAD>State Cess</GSTRATEDUTYHEAD>", xml)
+        self.assertIn("<GSTRATE>18</GSTRATE>", xml)
+        self.assertIn("<GSTRATE>0</GSTRATE>", xml)
+        self.assertIn("<GSTRATEPERUNIT>0</GSTRATEPERUNIT>", xml)
         self.assertIn("<TEMPGSTITEMSLABRATES.LIST />", xml)
 
     def test_system_ledger_xml_alters_gst_tax_ledgers(self) -> None:
@@ -249,6 +293,13 @@ class TallyServiceTests(unittest.TestCase):
         self.assertIn("<LEDGERNAME>Input CGST</LEDGERNAME>", xml)
         self.assertIn("<LEDGERNAME>Input SGST</LEDGERNAME>", xml)
         self.assertIn("<ADDLALLOCTYPE>Appropriate by condition</ADDLALLOCTYPE>", xml)
+        self.assertIn("<GSTRATEDUTYHEAD>State Tax</GSTRATEDUTYHEAD>", xml)
+        self.assertIn("<GSTRATEDUTYHEAD>CGST</GSTRATEDUTYHEAD>", xml)
+        self.assertIn("<GSTRATEDUTYHEAD>SGST/UTGST</GSTRATEDUTYHEAD>", xml)
+        self.assertIn("<GSTRATEDUTYHEAD>IGST</GSTRATEDUTYHEAD>", xml)
+        self.assertIn("<GSTRATEDUTYHEAD>Cess</GSTRATEDUTYHEAD>", xml)
+        self.assertIn("<GSTRATEDUTYHEAD>State Cess</GSTRATEDUTYHEAD>", xml)
+        self.assertIn("<GSTRATE>18</GSTRATE>", xml)
 
     def test_inventory_purchase_voucher_prefers_clean_item_name(self) -> None:
         """Direct item-wise posting should use item_name for Tally stock item names."""
@@ -651,6 +702,79 @@ class TallyServiceTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     workflow.post_invoice_items_to_tally(invoice_id)
                 client.post_inventory_purchase_voucher.assert_not_called()
+
+    def test_workflow_tally_post_is_blocked_before_preflight_when_license_rejects(self) -> None:
+        """Ledger-only Tally posting should fail before preflight or voucher calls."""
+        engine = self.make_engine()
+        invoice_id = self.create_invoice(engine)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        self.license_check.side_effect = ValueError("license blocked")
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            with patch("desktop_app.services.workflow.TallyClient") as client_cls:
+                client = client_cls.return_value
+                client.fetch_tally_serial_number.return_value = "BAD-SERIAL"
+                with self.assertRaisesRegex(ValueError, "license blocked"):
+                    workflow.post_invoice_to_tally(invoice_id)
+
+        client.preflight_purchase_invoice.assert_not_called()
+        client.sync_vendor_master.assert_not_called()
+        client.sync_system_ledgers.assert_not_called()
+        client.post_purchase_voucher.assert_not_called()
+
+    def test_workflow_tally_item_post_is_blocked_before_preflight_when_license_rejects(self) -> None:
+        """Item-wise Tally posting should fail before inventory preflight or posting."""
+        engine = self.make_engine()
+        invoice_id = self.create_invoice(engine)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        self.license_check.side_effect = ValueError("license blocked")
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            with patch("desktop_app.services.workflow.TallyClient") as client_cls:
+                client = client_cls.return_value
+                client.fetch_tally_serial_number.return_value = "BAD-SERIAL"
+                with self.assertRaisesRegex(ValueError, "license blocked"):
+                    workflow.post_invoice_items_to_tally(invoice_id)
+
+        client.preflight_inventory_purchase_invoice.assert_not_called()
+        client.sync_vendor_master.assert_not_called()
+        client.sync_system_ledgers.assert_not_called()
+        client.sync_inventory_item_masters.assert_not_called()
+        client.post_inventory_purchase_voucher.assert_not_called()
+
+    def test_workflow_tally_syncs_are_blocked_when_license_rejects(self) -> None:
+        """Vendor and system ledger syncs should also require a matching Tally serial."""
+        engine = self.make_engine()
+        invoice_id = self.create_invoice(engine)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        self.license_check.side_effect = ValueError("license blocked")
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            with patch("desktop_app.services.workflow.TallyClient") as client_cls:
+                client = client_cls.return_value
+                client.fetch_tally_serial_number.return_value = "BAD-SERIAL"
+                with self.assertRaisesRegex(ValueError, "license blocked"):
+                    workflow.sync_vendor_master_to_tally(invoice_id)
+                with self.assertRaisesRegex(ValueError, "license blocked"):
+                    workflow.sync_tally_system_ledgers(invoice_id)
+
+        self.assertEqual(client.fetch_tally_serial_number.call_count, 2)
+        client.sync_vendor_master.assert_not_called()
+        client.sync_system_ledgers.assert_not_called()
+
+    def test_downloadable_exports_do_not_check_tally_license(self) -> None:
+        """File-based exports should remain available without direct Tally serial checks."""
+        engine = self.make_engine()
+        invoice_id = self.create_invoice(engine)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            for fmt in ("csv", "json", "tally"):
+                content, filename = workflow.export_invoice(invoice_id, fmt)
+                self.assertIsNotNone(filename)
+                self.assertTrue(content)
+
+        self.license_check.assert_not_called()
 
     def test_workflow_rejects_unapproved_invoice_for_tally_posting(self) -> None:
         """Only approved or already posted invoices can be posted to Tally."""

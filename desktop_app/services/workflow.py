@@ -33,6 +33,7 @@ from ..domain.schemas import (
 from .documents.document_source import DocumentKind, classify_document, validate_upload_file
 from .documents.extraction import ScannedDocumentException
 from .exports.exporters import export_invoice_csv, export_invoice_json, export_invoice_tally, export_to_erpnext
+from .licensing import assert_tally_serial_allowed
 from .parsing.ai_client import AIRateLimitError
 from .parsing.ai_parser import extract_invoice_source_text, parse_invoice, parse_invoice_file
 from .tally import TallyClient
@@ -288,6 +289,7 @@ class DesktopWorkflow:
             if data is None:
                 raise ValueError("No extracted invoice data is available for Tally posting.")
             client = TallyClient()
+            self.assert_tally_license(client)
             client.check_connection()
             preflight = client.preflight_purchase_invoice(data)
             return {
@@ -307,6 +309,7 @@ class DesktopWorkflow:
             if data is None:
                 raise ValueError("No extracted invoice data is available for Tally item posting.")
             client = TallyClient()
+            self.assert_tally_license(client)
             preflight = client.preflight_inventory_purchase_invoice(data)
             return {
                 "missing_masters": preflight.missing_labels(),
@@ -330,6 +333,7 @@ class DesktopWorkflow:
             if data is None:
                 raise ValueError("No extracted invoice data is available for Tally posting.")
             client = TallyClient()
+            self.assert_tally_license(client)
             client.check_connection()
             preflight = client.preflight_purchase_invoice(data)
             if preflight.has_missing:
@@ -374,6 +378,7 @@ class DesktopWorkflow:
             if data is None:
                 raise ValueError("No extracted invoice data is available for Tally item posting.")
             client = TallyClient()
+            self.assert_tally_license(client)
             preflight = client.preflight_inventory_purchase_invoice(data)
             if preflight.has_missing:
                 if not create_missing_masters:
@@ -413,6 +418,7 @@ class DesktopWorkflow:
             if data is None:
                 raise ValueError("No extracted invoice data is available for Tally vendor sync.")
             client = TallyClient()
+            self.assert_tally_license(client)
             client.check_connection()
             response = client.sync_vendor_master(data)
             if not response.success:
@@ -428,6 +434,7 @@ class DesktopWorkflow:
             if invoice_id is not None:
                 self.require_invoice(db, invoice_id)
             client = TallyClient()
+            self.assert_tally_license(client)
             client.check_connection()
             response = client.sync_system_ledgers()
             if not response.success:
@@ -559,6 +566,11 @@ class DesktopWorkflow:
         logger.info("Audit invoice #%s | %s | %s", invoice_id, user, action)
         db.add(AuditLog(invoice_id=invoice_id, user=user, action=action, reason=reason))
         db.commit()
+
+    def assert_tally_license(self, client: TallyClient) -> None:
+        """Verify that the connected TallyPrime serial is licensed for direct export."""
+        serial = client.fetch_tally_serial_number()
+        assert_tally_serial_allowed(serial)
 
     def progress(self, callback: ProgressCallback | None, message: str, *, level: str = "info") -> None:
         """Emit one optional user-facing processing progress event."""

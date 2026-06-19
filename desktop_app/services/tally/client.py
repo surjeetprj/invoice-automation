@@ -3,12 +3,14 @@ from __future__ import annotations
 """HTTP/XML client for local TallyPrime direct posting."""
 
 from dataclasses import dataclass
+import re
 from typing import Iterable
 from xml.etree import ElementTree
+from xml.etree.ElementTree import Element, SubElement, tostring
 
 import requests
 
-from ...config import TALLY_TIMEOUT_SECONDS, TALLY_URL
+from ...config import TALLY_SERIAL_NUMBER, TALLY_TIMEOUT_SECONDS, TALLY_URL
 from ...domain.schemas import InvoiceData
 from .masters import (
     STOCK_GROUP_MASTER,
@@ -74,6 +76,18 @@ class TallyClient:
             return response.text
         except requests.RequestException as exc:
             raise ConnectionError(f"Could not connect to TallyPrime at {self.url}: {exc}") from exc
+
+    def fetch_tally_serial_number(self) -> str:
+        """Return the connected or configured TallyPrime serial number or fail closed."""
+        raw = self.post_xml(build_tally_identity_xml())
+        serial = parse_tally_serial_number(raw) or configured_tally_serial_number()
+        if not serial:
+            raise ConnectionError(
+                "Could not verify TallyPrime serial number. TallyPrime did not expose a serial through "
+                "the local HTTP/XML response, and TALLY_SERIAL_NUMBER is not configured. "
+                "TallyPrime export is blocked for this license."
+            )
+        return serial
 
     def check_connection(self) -> None:
         """Raise if the TallyPrime HTTP endpoint cannot be reached."""
@@ -268,3 +282,70 @@ def validate_inventory_item_posting(data: InvoiceData) -> None:
             issues.append(f"Line {index}: " + ", ".join(line_issues))
     if issues:
         raise ValueError("Item posting requires complete reviewed line items.\n" + "\n".join(issues))
+
+TALLY_SERIAL_FIELD_NAMES = {
+    "SERIALNUMBER",
+    "LICENSESERIALNUMBER",
+    "LICENSENUMBER",
+    "TALLYSERIALNUMBER",
+    "TALLYNETSERIALNUMBER",
+    "TALLYLICENSESERIALNUMBER",
+    "ACCOUNTID",
+}
+
+
+def configured_tally_serial_number() -> str | None:
+    """Return the optional configured Tally serial fallback."""
+    serial = str(TALLY_SERIAL_NUMBER or "").strip()
+    return serial or None
+
+
+def build_tally_identity_xml() -> bytes:
+    """Build a Tally collection export request for license/serial identity fields."""
+    envelope = Element("ENVELOPE")
+    header = SubElement(envelope, "HEADER")
+    SubElement(header, "VERSION").text = "1"
+    SubElement(header, "TALLYREQUEST").text = "Export"
+    SubElement(header, "TYPE").text = "Collection"
+    SubElement(header, "ID").text = "InvoiceAITallyIdentity"
+    body = SubElement(envelope, "BODY")
+    desc = SubElement(body, "DESC")
+    static = SubElement(desc, "STATICVARIABLES")
+    SubElement(static, "SVEXPORTFORMAT").text = "$$SysName:XML"
+    tdl = SubElement(desc, "TDL")
+    message = SubElement(tdl, "TDLMESSAGE")
+    collection = SubElement(message, "COLLECTION", NAME="InvoiceAITallyIdentity", ISMODIFY="No")
+    SubElement(collection, "TYPE").text = "Company"
+    SubElement(collection, "FETCH").text = ",".join(sorted(TALLY_SERIAL_FIELD_NAMES | {"NAME", "GUID"}))
+    return tostring(envelope, encoding="utf-8", xml_declaration=True)
+
+
+def parse_tally_serial_number(xml_text: str) -> str | None:
+    """Extract a TallyPrime serial number from a Tally XML response."""
+    try:
+        root = ElementTree.fromstring(xml_text.strip())
+    except ElementTree.ParseError:
+        return None
+    for element in root.iter():
+        for attr_name, attr_value in element.attrib.items():
+            if is_serial_field(attr_name) and serial_value(attr_value):
+                return serial_value(attr_value)
+        tag = element.tag.upper().replace(".", "").replace("_", "")
+        if is_serial_field(tag) and element.text and serial_value(element.text):
+            return serial_value(element.text)
+    return None
+
+
+def is_serial_field(name: str) -> bool:
+    """Return True when a Tally XML field name appears to represent a license serial."""
+    normalized = name.upper().replace(".", "").replace("_", "")
+    return normalized in TALLY_SERIAL_FIELD_NAMES or ("SERIAL" in normalized and "LICENSE" in normalized)
+
+
+def serial_value(value: str | None) -> str | None:
+    """Normalize and validate a candidate Tally serial value."""
+    text = " ".join(str(value or "").strip().split())
+    if not text:
+        return None
+    candidates = re.findall(r"[A-Za-z0-9][A-Za-z0-9\-_/]{3,}", text)
+    return candidates[-1] if candidates else None
