@@ -116,3 +116,21 @@ The review flow separates saving corrections from approval:
 - Reviewers can submit corrections repeatedly; each save reloads the detail
   page from the saved payload.
 - `Approve` is the only UI action that marks the invoice approved.
+
+## TallyPrime License Gate
+
+Direct TallyPrime preflight, master sync, and voucher posting are protected by a
+signed local InvoiceAI license. The workflow asks `TallyClient` for the connected
+TallyPrime serial number, then `services/licensing.py` verifies that the serial
+appears in the signed allow-list. Upload, AI extraction, review, approval,
+downloadable CSV/JSON/Tally XML exports, and ERPNext export are not blocked by
+this license gate.
+
+The license file defaults to the app runtime directory as
+`invoiceai_license.json`, or `INVOICEAI_LICENSE_FILE` may point to a custom path.
+Some TallyPrime installations do not expose the serial number through the default
+HTTP/XML response; in that case `TALLY_SERIAL_NUMBER` in `.env` is used as a
+fallback and is still checked against the signed license.
+
+License files are signed with Ed25519. The app embeds only the public key. The
+private signing key and generated customer license files must remain outside git.

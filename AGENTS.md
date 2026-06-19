@@ -34,6 +34,10 @@ Working rules:
 - Keep direct TallyPrime HTTP/XML posting services in
   `desktop_app/services/tally`; file-based downloadable exports remain in
   `desktop_app/services/exports`.
+- TallyPrime direct actions are serial-locked through signed local licenses.
+  Keep license verification in `desktop_app/services/licensing.py`, Tally serial
+  probing in `desktop_app/services/tally/client.py`, and support signing tools in
+  `desktop_app/tools`. Do not commit private keys or generated license files.
 - Keep TallyPrime ledger-only and item-wise purchase posting behavior explicit
   in workflow and UI labels. Ledger-only posting creates accounting purchase
   vouchers; item-wise posting creates inventory purchase vouchers with stock
