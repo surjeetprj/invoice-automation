@@ -371,6 +371,47 @@ class DatabasePersistenceTests(unittest.TestCase):
             self.assertTrue(any("Corrections saved" in action for action in actions))
             self.assertFalse(any("APPROVED" in action for action in actions))
 
+    def test_save_corrections_allowed_after_approval(self) -> None:
+        """Approved invoices should still allow extraction corrections without changing status."""
+        engine = self.make_engine()
+        Base.metadata.create_all(engine)
+        data = self.sample_invoice_data()
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = Invoice(
+                filename="invoice.pdf",
+                file_path="C:/tmp/invoice.pdf",
+                status=InvoiceStatus.APPROVED,
+                reviewed_by="approver",
+            )
+            db.add(invoice)
+            db.flush()
+            persist_extraction(db, invoice, data, validate_invoice(data), "raw text")
+            db.commit()
+            invoice_id = invoice.id
+
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            result = workflow.submit_review(
+                invoice_id,
+                {"decision": "save_corrections", "reviewer": "reviewer", "corrections": {"vendor_name": "Corrected Vendor"}},
+            )
+
+        self.assertEqual(result["status"], InvoiceStatus.APPROVED)
+        self.assertEqual(result["reviewed_by"], "approver")
+        self.assertEqual(result["extracted_data"]["vendor_name"], "Corrected Vendor")
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = db.get(Invoice, invoice_id)
+            self.assertIsNotNone(invoice)
+            assert invoice is not None
+            self.assertEqual(invoice.status, InvoiceStatus.APPROVED)
+            self.assertEqual(invoice.reviewed_by, "approver")
+            loaded = invoice_data_from_invoice(invoice)
+            self.assertIsNotNone(loaded)
+            assert loaded is not None
+            self.assertEqual(loaded.vendor_name, "Corrected Vendor")
+
+
     def test_save_corrections_can_run_multiple_times(self) -> None:
         """Reviewers should be able to save corrected extraction data repeatedly."""
         engine = self.make_engine()

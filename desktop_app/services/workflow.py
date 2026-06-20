@@ -36,7 +36,9 @@ from .exports.exporters import export_invoice_csv, export_invoice_json, export_i
 from .licensing import assert_tally_serial_allowed
 from .parsing.ai_client import AIRateLimitError
 from .parsing.ai_parser import extract_invoice_source_text, parse_invoice, parse_invoice_file
+from .settings import build_tally_settings, get_tally_settings, license_file_path, save_tally_settings
 from .tally import TallyClient
+from .tally.client import mask_serial
 from ..domain.validation import calculate_confidence_score, validate_invoice
 
 logger = logging.getLogger(__name__)
@@ -53,6 +55,42 @@ class DesktopWorkflow:
         logger.info("Initializing desktop database")
         init_db()
         self._initialized = True
+
+    def get_settings(self) -> dict[str, Any]:
+        """Return runtime-editable desktop settings for the UI."""
+        self.initialize()
+        return {"tally": get_tally_settings().model_dump()}
+
+    def save_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist runtime-editable desktop settings."""
+        self.initialize()
+        tally_payload = payload.get("tally", payload) if isinstance(payload, dict) else {}
+        settings = save_tally_settings(tally_payload if isinstance(tally_payload, dict) else {})
+        return {"tally": settings.model_dump()}
+
+    def list_tally_companies(self) -> list[str]:
+        """Return available company names from the local TallyPrime HTTP endpoint."""
+        self.initialize()
+        logger.info("Listing TallyPrime companies")
+        return sorted(TallyClient().fetch_company_names(), key=str.casefold)
+
+    def test_tally_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Test TallyPrime reachability and serial detection for unsaved settings."""
+        self.initialize()
+        tally_payload = payload.get("tally", payload) if isinstance(payload, dict) else {}
+        settings = build_tally_settings(tally_payload if isinstance(tally_payload, dict) else {})
+        client = TallyClient(
+            url=settings.tally_url,
+            timeout=settings.tally_timeout_seconds,
+        )
+        companies = sorted(client.fetch_company_names(), key=str.casefold)
+        serial = client.fetch_tally_serial_number()
+        return {
+            "success": True,
+            "message": "TallyPrime connection verified.",
+            "serial_number": serial,
+            "companies": companies,
+        }
 
     def health(self) -> dict[str, str]:
         """Return a lightweight readiness payload."""
@@ -184,7 +222,12 @@ class DesktopWorkflow:
         logger.info("Review submitted for invoice #%s: %s", invoice_id, review.decision.value)
         with session_scope() as db:
             invoice = self.require_invoice(db, invoice_id)
-            if invoice.status not in {InvoiceStatus.PENDING_REVIEW, InvoiceStatus.EXTRACTED, InvoiceStatus.REJECTED}:
+            reviewable_statuses = {InvoiceStatus.PENDING_REVIEW, InvoiceStatus.EXTRACTED, InvoiceStatus.REJECTED}
+            correction_statuses = reviewable_statuses | {InvoiceStatus.APPROVED, InvoiceStatus.POSTED}
+            if review.decision == ReviewDecision.SAVE_CORRECTIONS:
+                if invoice.status not in correction_statuses:
+                    raise ValueError(f"Cannot save corrections for invoice in '{invoice.status}' status")
+            elif invoice.status not in reviewable_statuses:
                 raise ValueError(f"Cannot review invoice in '{invoice.status}' status")
             now = datetime.now(timezone.utc)
             if review.decision == ReviewDecision.APPROVE:
@@ -569,8 +612,16 @@ class DesktopWorkflow:
 
     def assert_tally_license(self, client: TallyClient) -> None:
         """Verify that the connected TallyPrime serial is licensed for direct export."""
+        logger.info("Tally license verification started")
         serial = client.fetch_tally_serial_number()
-        assert_tally_serial_allowed(serial)
+        active_license_file = license_file_path()
+        logger.info(
+            "Tally license allow-list check started for serial %s using license file: %s",
+            mask_serial(serial),
+            active_license_file,
+        )
+        assert_tally_serial_allowed(serial, active_license_file)
+        logger.info("Tally license verification passed for serial %s", mask_serial(serial))
 
     def progress(self, callback: ProgressCallback | None, message: str, *, level: str = "info") -> None:
         """Emit one optional user-facing processing progress event."""

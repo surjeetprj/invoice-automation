@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 from desktop_app.ui.constants import FIELD_GROUPS, LINE_COLUMNS, REQUIRED_METADATA_FIELDS
 from desktop_app.ui.detail_page import DetailPage
 from desktop_app.ui.main_window import MainWindow
+from desktop_app.ui.settings_dialog import SettingsDialog
 from desktop_app.ui.upload_page import UploadPage
 from desktop_app.ui.widgets.worker import Worker
 
@@ -37,12 +38,10 @@ class DetailPageLayoutTests(unittest.TestCase):
             self.assertEqual([page.tabs.tabText(index) for index in range(page.tabs.count())], ["Metadata", "Validation", "Audit Logs"])
             self.assertEqual(page.splitter.widget(1).minimumWidth(), 360)
             labels = [action.text() for action in page.export_btn.menu().actions()]
-            self.assertIn("✕ CSV", labels)
-            self.assertIn("✕ JSON", labels)
-            self.assertIn("✕ Tally XML", labels)
-            self.assertIn("Post Purchase Voucher to TallyPrime", labels)
-            self.assertIn("Post Item-wise Purchase Voucher to TallyPrime", labels)
-            self.assertIn("✕ ERPNext", labels)
+            self.assertIn("\u2715 CSV", labels)
+            self.assertIn("\u2715 JSON", labels)
+            self.assertIn("\u2715 Tally XML", labels)
+            self.assertIn("\u2715 ERPNext", labels)
         finally:
             page.deleteLater()
 
@@ -233,6 +232,38 @@ class DetailPageLayoutTests(unittest.TestCase):
             self.assertTrue(page.approve_btn.isEnabled())
         finally:
             page.deleteLater()
+    def test_approved_invoice_allows_corrections_and_export_only(self) -> None:
+        """Approved invoices can be corrected again, while export stays available."""
+        page = DetailPage()
+        try:
+            page.load_invoice(
+                {
+                    "id": 5,
+                    "status": "Approved",
+                    "confidence_score": 1.0,
+                    "extracted_data": {
+                        "invoice_number": "INV-5",
+                        "date": "01-04-2026",
+                        "vendor_name": "Vendor A",
+                        "total_taxable_amount": 100.0,
+                        "total_amount": 118.0,
+                        "line_items": [],
+                    },
+                    "validation": {"is_valid": True, "errors": [], "warnings": [], "issues": []},
+                }
+            )
+            self.assertFalse(page.approve_btn.isEnabled())
+            self.assertFalse(page.reject_btn.isEnabled())
+            self.assertTrue(page.export_btn.isEnabled())
+            self.assertFalse(page.corrections_btn.isEnabled())
+
+            page.metadata.fields["vendor_name"].setText("Corrected Vendor")
+            self.assertTrue(page.corrections_btn.isEnabled())
+            self.assertTrue(page.export_btn.isEnabled())
+        finally:
+            page.deleteLater()
+
+
     def test_main_window_uses_top_bar_navigation(self) -> None:
         """The app shell should use a top bar instead of the old sidebar splitter."""
 
@@ -258,6 +289,9 @@ class DetailPageLayoutTests(unittest.TestCase):
             def list_invoices(self):
                 return {"invoices": []}
 
+
+            def get_settings(self):
+                return {"tally": {"tally_company": "Demo Company"}}
         with (
             patch("desktop_app.ui.main_window.DesktopWorkflow", return_value=FakeWorkflow()),
             patch.object(MainWindow, "run_task", new=run_immediately),
@@ -271,6 +305,8 @@ class DetailPageLayoutTests(unittest.TestCase):
                 self.assertEqual(top_bar.objectName(), "topBar")
                 self.assertFalse(hasattr(window, "root_splitter"))
                 self.assertEqual(set(window.nav_buttons), {"dashboard", "invoices", "upload"})
+                self.assertEqual(window.company_selector.currentText(), "Demo Company")
+                self.assertEqual(window.settings_btn.text(), "Settings")
 
                 window.show_invoices()
                 self.assertTrue(window.nav_buttons["invoices"].property("active"))
@@ -281,6 +317,21 @@ class DetailPageLayoutTests(unittest.TestCase):
             finally:
                 window.close()
                 window.deleteLater()
+
+    def test_settings_dialog_round_trips_default_stock_group(self) -> None:
+        """Settings dialog should include the default stock group field."""
+        dialog = SettingsDialog()
+        try:
+            dialog.load_settings({"default_stock_group": "Software Services"})
+            self.assertEqual(dialog.default_stock_group.text(), "Software Services")
+
+            dialog.default_stock_group.setText("Licenses")
+            self.assertEqual(dialog.settings_payload()["default_stock_group"], "Licenses")
+            self.assertNotIn("tally_serial_number", dialog.settings_payload())
+            self.assertFalse(hasattr(dialog, "serial_number"))
+        finally:
+            dialog.deleteLater()
+
 
     def test_upload_page_status_replaces_processing_steps(self) -> None:
         """Upload status should show only one latest processing message."""

@@ -393,10 +393,12 @@ class DetailPage(QWidget):
         """Enable or disable review actions based on invoice state."""
         status = (self.invoice or {}).get("status")
         reviewable = status in {"Pending_Review", "Rejected", "Extracted"}
+        exportable = status in {"Approved", "Posted"}
         valid = self.metadata.is_valid() and self.line_items.is_valid()
         self.approve_btn.setEnabled(reviewable and valid)
         self.reject_btn.setEnabled(reviewable)
-        self.corrections_btn.setEnabled(reviewable and self.dirty and valid)
+        self.corrections_btn.setEnabled(self.invoice is not None and self.dirty and valid)
+        self.export_btn.setEnabled(exportable)
 
     def invoice_id(self) -> int | None:
         """Return the current invoice ID, if a record is loaded."""
