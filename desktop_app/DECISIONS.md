@@ -46,11 +46,12 @@
   failed post leaves the existing invoice status unchanged.
 - Direct TallyPrime sync/post actions require a signed local InvoiceAI license
   whose allowed serial list matches the connected TallyPrime serial or
-  support-only fallback serial.
-  exports, or ERPNext export.
+  support-only fallback serial. This gate must not block upload, review,
+  approval, downloadable exports, or ERPNext export.
 - TallyPrime serial verification should probe the connected TallyPrime over
-  HTTP/XML first. The `.env` `TALLY_SERIAL_NUMBER` value is a support-only
-  fallback and is still verified against the signed license allow-list.
+  HTTP/XML first with the LicenseInfo TDL report, then the company identity
+  collection. The `.env` `TALLY_SERIAL_NUMBER` value is a support-only fallback
+  and is still verified against the signed license allow-list.
 - Vendor, purchase, and GST ledger masters may be synced to TallyPrime, but
   the app relies on the configured ledger names as the stable mapping contract.
 - Customer-editable Tally defaults live in runtime `settings.json`; saved

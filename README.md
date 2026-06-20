@@ -96,8 +96,9 @@ The Export Data menu supports file-based exports and direct TallyPrime posting:
 Direct TallyPrime posting requires TallyPrime to be running locally with the
 target company open and HTTP enabled, usually at `http://localhost:9000`.
 The top bar includes a Company selector and Settings button for customer-editable
-Tally defaults, including the default stock group for item-wise posting. Settings are saved locally in `InvoiceAI\settings.json` under the
-app-data directory and override `.env` defaults for future Tally sync/post actions.
+Tally defaults, including the default stock group for item-wise posting.
+Settings are saved locally in `InvoiceAI\settings.json` under the app-data
+directory and override `.env` defaults for future Tally sync/post actions.
 Missing masters are created only after reviewer confirmation. Item-wise posting
 uses the reviewed `Item Name` field as the clean TallyPrime stock item/master
 name while preserving the full invoice description separately. It can create
@@ -108,10 +109,11 @@ Direct TallyPrime posting and Tally master sync also require a signed InvoiceAI
 license file whose allowed TallyPrime serial list matches the connected local
 TallyPrime installation. Configure `INVOICEAI_LICENSE_FILE` when the license
 file is not stored at the default app-data path. InvoiceAI first probes
-TallyPrime over HTTP/XML for the connected serial. If a customer installation
-still cannot expose the serial, support may set the hidden `TALLY_SERIAL_NUMBER`
-fallback in `desktop_app\.env`; it must match the signed license and is not
-editable from the app Settings dialog.
+TallyPrime over HTTP/XML using the LicenseInfo TDL report probe, then the
+company collection identity probe. If a customer installation still cannot
+expose the serial, support may set the hidden `TALLY_SERIAL_NUMBER` fallback in
+`desktop_app\.env`; it must match the signed license and is not editable from
+the app Settings dialog.
 
 ## License Key Generation
 

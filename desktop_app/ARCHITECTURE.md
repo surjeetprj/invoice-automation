@@ -101,10 +101,10 @@ Both modes follow a controlled flow:
 
 Master creation is intentionally controlled. Vendor ledgers are created under
 `Sundry Creditors`, purchase ledgers under `Purchase Accounts`, input tax
-ledgers under `Duties & Taxes`, stock items under the configured default stock group, and units as simple
-units. Item-wise posting is blocked before any Tally voucher request when
-required line-item fields are missing or invalid, rather than silently
-downgrading to ledger-only posting.
+ledgers under `Duties & Taxes`, stock items under the configured default stock
+group, and units as simple units. Item-wise posting is blocked before any Tally
+voucher request when required line-item fields are missing or invalid, rather
+than silently downgrading to ledger-only posting.
 
 For scanned/image invoices, reliable invoice totals are preferred over
 unreliable visual line-item detail. If visual line rows do not reconcile with
@@ -131,10 +131,14 @@ this license gate.
 
 The license file defaults to the app runtime directory as
 `invoiceai_license.json`, or `INVOICEAI_LICENSE_FILE` may point to a custom path.
-InvoiceAI first probes TallyPrime over HTTP/XML for the connected serial. If an
-installation still cannot expose the serial, the hidden `.env` fallback
-`TALLY_SERIAL_NUMBER` may be used by support and is still checked against the
-signed license.
+InvoiceAI probes TallyPrime over HTTP/XML in this order:
+
+1. LicenseInfo TDL report probe using `$$LicenseInfo:SerialNumber`.
+2. Company collection identity probe.
+3. Hidden support-only `.env` fallback `TALLY_SERIAL_NUMBER`.
+
+The fallback remains signed-license checked and is not editable from the app
+Settings dialog.
 
 License files are signed with Ed25519. The app embeds only the public key. The
 private signing key and generated customer license files must remain outside git.
