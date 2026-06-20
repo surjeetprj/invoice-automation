@@ -52,6 +52,9 @@
   HTTP/XML first with the LicenseInfo TDL report, then the company identity
   collection. The `.env` `TALLY_SERIAL_NUMBER` value is a support-only fallback
   and is still verified against the signed license allow-list.
+- Direct TallyPrime sync/post actions must block when the selected company is
+  blank or not returned by TallyPrime, so a wrong setting cannot accidentally
+  create masters or vouchers in another company.
 - Vendor, purchase, and GST ledger masters may be synced to TallyPrime, but
   the app relies on the configured ledger names as the stable mapping contract.
 - Customer-editable Tally defaults live in runtime `settings.json`; saved

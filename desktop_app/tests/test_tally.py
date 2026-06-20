@@ -35,8 +35,14 @@ class TallyServiceTests(unittest.TestCase):
         """Keep existing posting tests focused on Tally behavior, not licensing."""
         self.license_patch = patch("desktop_app.services.workflow.assert_tally_serial_allowed")
         self.license_check = self.license_patch.start()
+        self.workflow_settings_patch = patch(
+            "desktop_app.services.workflow.get_tally_settings",
+            return_value=TallySettings(tally_company="Runtime Company"),
+        )
+        self.workflow_settings_patch.start()
 
     def tearDown(self) -> None:
+        self.workflow_settings_patch.stop()
         self.license_patch.stop()
 
     def sample_invoice_data(self) -> InvoiceData:
@@ -551,6 +557,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.check_connection.return_value = None
                 client.preflight_purchase_invoice.return_value = TallyPreflight((), ())
                 client.sync_vendor_master.return_value = TallyResponse(success=True, altered=1)
@@ -576,6 +583,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.preflight_inventory_purchase_invoice.return_value = TallyPreflight((), ())
                 client.sync_vendor_master.return_value = TallyResponse(success=True, altered=1)
                 client.sync_system_ledgers.return_value = TallyResponse(success=True, altered=4)
@@ -602,6 +610,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.check_connection.return_value = None
                 client.preflight_purchase_invoice.return_value = TallyPreflight(missing, missing)
                 result = workflow.post_invoice_to_tally(invoice_id, create_missing_masters=False)
@@ -625,6 +634,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.preflight_inventory_purchase_invoice.return_value = TallyPreflight(missing, missing)
                 result = workflow.post_invoice_items_to_tally(invoice_id, create_missing_masters=False)
 
@@ -645,6 +655,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.check_connection.return_value = None
                 client.preflight_purchase_invoice.return_value = TallyPreflight(missing, missing)
                 client.create_missing_masters.return_value = TallyResponse(success=True, created=1)
@@ -672,6 +683,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.preflight_inventory_purchase_invoice.return_value = TallyPreflight(missing, missing)
                 client.create_missing_inventory_masters.return_value = TallyResponse(success=True, created=2)
                 client.sync_vendor_master.return_value = TallyResponse(success=True, altered=1)
@@ -694,6 +706,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.check_connection.return_value = None
                 client.sync_vendor_master.return_value = TallyResponse(success=True, altered=1)
                 result = workflow.sync_vendor_master_to_tally(invoice_id)
@@ -711,6 +724,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.check_connection.return_value = None
                 client.sync_system_ledgers.return_value = TallyResponse(success=True, altered=4)
                 result = workflow.sync_tally_system_ledgers(invoice_id)
@@ -728,6 +742,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.check_connection.return_value = None
                 client.preflight_purchase_invoice.return_value = TallyPreflight((), ())
                 client.sync_vendor_master.return_value = TallyResponse(success=True, altered=1)
@@ -751,6 +766,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.preflight_inventory_purchase_invoice.return_value = TallyPreflight((), ())
                 client.sync_vendor_master.return_value = TallyResponse(success=True, altered=1)
                 client.sync_system_ledgers.return_value = TallyResponse(success=True, altered=4)
@@ -799,6 +815,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.preflight_inventory_purchase_invoice.side_effect = ValueError(
                     "Item posting requires complete reviewed line items.\nLine 1: quantity must be greater than 0"
                 )
@@ -816,6 +833,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.fetch_tally_serial_number.return_value = "BAD-SERIAL"
                 with self.assertRaisesRegex(ValueError, "license blocked"):
                     workflow.post_invoice_to_tally(invoice_id)
@@ -835,6 +853,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.fetch_tally_serial_number.return_value = "BAD-SERIAL"
                 with self.assertRaisesRegex(ValueError, "license blocked"):
                     workflow.post_invoice_items_to_tally(invoice_id)
@@ -855,6 +874,7 @@ class TallyServiceTests(unittest.TestCase):
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
             with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                 client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
                 client.fetch_tally_serial_number.return_value = "BAD-SERIAL"
                 with self.assertRaisesRegex(ValueError, "license blocked"):
                     workflow.sync_vendor_master_to_tally(invoice_id)
@@ -864,6 +884,43 @@ class TallyServiceTests(unittest.TestCase):
         self.assertEqual(client.fetch_tally_serial_number.call_count, 2)
         client.sync_vendor_master.assert_not_called()
         client.sync_system_ledgers.assert_not_called()
+
+    def test_workflow_blocks_tally_post_when_company_not_selected(self) -> None:
+        """Direct Tally posting should require an explicit selected company."""
+        engine = self.make_engine()
+        invoice_id = self.create_invoice(engine)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.get_tally_settings", return_value=TallySettings(tally_company="")):
+            with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+                with patch("desktop_app.services.workflow.TallyClient") as client_cls:
+                    client = client_cls.return_value
+                    with self.assertRaisesRegex(ValueError, "Select a TallyPrime company"):
+                        workflow.post_invoice_to_tally(invoice_id)
+
+        client.fetch_company_names.assert_not_called()
+        client.fetch_tally_serial_number.assert_not_called()
+        client.preflight_purchase_invoice.assert_not_called()
+        self.license_check.assert_not_called()
+
+    def test_workflow_blocks_tally_post_when_selected_company_is_not_open(self) -> None:
+        """Direct Tally posting should stop when Tally does not return the selected company."""
+        engine = self.make_engine()
+        invoice_id = self.create_invoice(engine)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            with patch("desktop_app.services.workflow.TallyClient") as client_cls:
+                client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Other Company"}
+                with self.assertRaisesRegex(ValueError, "Selected TallyPrime company was not found"):
+                    workflow.post_invoice_to_tally(invoice_id)
+
+        client.fetch_tally_serial_number.assert_not_called()
+        client.preflight_purchase_invoice.assert_not_called()
+        client.create_missing_masters.assert_not_called()
+        client.post_purchase_voucher.assert_not_called()
+        self.license_check.assert_not_called()
 
     def test_downloadable_exports_do_not_check_tally_license(self) -> None:
         """File-based exports should remain available without direct Tally serial checks."""

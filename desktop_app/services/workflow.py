@@ -332,6 +332,7 @@ class DesktopWorkflow:
             if data is None:
                 raise ValueError("No extracted invoice data is available for Tally posting.")
             client = TallyClient()
+            self.assert_tally_company_selected(client)
             self.assert_tally_license(client)
             client.check_connection()
             preflight = client.preflight_purchase_invoice(data)
@@ -352,6 +353,7 @@ class DesktopWorkflow:
             if data is None:
                 raise ValueError("No extracted invoice data is available for Tally item posting.")
             client = TallyClient()
+            self.assert_tally_company_selected(client)
             self.assert_tally_license(client)
             preflight = client.preflight_inventory_purchase_invoice(data)
             return {
@@ -376,6 +378,7 @@ class DesktopWorkflow:
             if data is None:
                 raise ValueError("No extracted invoice data is available for Tally posting.")
             client = TallyClient()
+            self.assert_tally_company_selected(client)
             self.assert_tally_license(client)
             client.check_connection()
             preflight = client.preflight_purchase_invoice(data)
@@ -421,6 +424,7 @@ class DesktopWorkflow:
             if data is None:
                 raise ValueError("No extracted invoice data is available for Tally item posting.")
             client = TallyClient()
+            self.assert_tally_company_selected(client)
             self.assert_tally_license(client)
             preflight = client.preflight_inventory_purchase_invoice(data)
             if preflight.has_missing:
@@ -461,6 +465,7 @@ class DesktopWorkflow:
             if data is None:
                 raise ValueError("No extracted invoice data is available for Tally vendor sync.")
             client = TallyClient()
+            self.assert_tally_company_selected(client)
             self.assert_tally_license(client)
             client.check_connection()
             response = client.sync_vendor_master(data)
@@ -477,6 +482,7 @@ class DesktopWorkflow:
             if invoice_id is not None:
                 self.require_invoice(db, invoice_id)
             client = TallyClient()
+            self.assert_tally_company_selected(client)
             self.assert_tally_license(client)
             client.check_connection()
             response = client.sync_system_ledgers()
@@ -609,6 +615,29 @@ class DesktopWorkflow:
         logger.info("Audit invoice #%s | %s | %s", invoice_id, user, action)
         db.add(AuditLog(invoice_id=invoice_id, user=user, action=action, reason=reason))
         db.commit()
+
+    def assert_tally_company_selected(self, client: TallyClient) -> None:
+        """Block direct Tally actions unless the selected company is available."""
+        selected_company = (get_tally_settings().tally_company or "").strip()
+        if not selected_company:
+            raise ValueError(
+                "Select a TallyPrime company from Settings > Refresh Companies before posting or syncing to TallyPrime."
+            )
+        logger.info("Tally company verification started for %s", selected_company)
+        available_companies = {str(company).strip() for company in client.fetch_company_names() if str(company).strip()}
+        if selected_company not in available_companies:
+            available_text = ", ".join(sorted(available_companies, key=str.casefold)) or "none returned by TallyPrime"
+            logger.warning(
+                "Tally company verification failed: selected=%s available=%s",
+                selected_company,
+                available_text,
+            )
+            raise ValueError(
+                "Selected TallyPrime company was not found in the running TallyPrime instance. "
+                "Use Settings > Refresh Companies and select the exact company before exporting. "
+                f"Selected: {selected_company}. Available: {available_text}."
+            )
+        logger.info("Tally company verification passed for %s", selected_company)
 
     def assert_tally_license(self, client: TallyClient) -> None:
         """Verify that the connected TallyPrime serial is licensed for direct export."""

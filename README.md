@@ -99,6 +99,10 @@ The top bar includes a Company selector and Settings button for customer-editabl
 Tally defaults, including the default stock group for item-wise posting.
 Settings are saved locally in `InvoiceAI\settings.json` under the app-data
 directory and override `.env` defaults for future Tally sync/post actions.
+Before any direct Tally sync/post, InvoiceAI verifies that the selected company
+is returned by the running TallyPrime instance. If the company is blank, typed
+wrongly, or not open/loaded in TallyPrime, export is blocked before masters or
+vouchers are created.
 Missing masters are created only after reviewer confirmation. Item-wise posting
 uses the reviewed `Item Name` field as the clean TallyPrime stock item/master
 name while preserving the full invoice description separately. It can create

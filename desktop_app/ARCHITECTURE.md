@@ -88,6 +88,7 @@ Direct TallyPrime posting has two explicit modes:
 
 Both modes follow a controlled flow:
 
+- Verify the selected Tally company is non-empty and returned by TallyPrime.
 - Check the local TallyPrime HTTP endpoint and active company.
 - Preflight required masters for the approved invoice.
 - Ask the reviewer before creating missing masters.
