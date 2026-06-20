@@ -45,14 +45,20 @@
 - A successful direct TallyPrime post changes invoice status to `Posted`; a
   failed post leaves the existing invoice status unchanged.
 - Direct TallyPrime sync/post actions require a signed local InvoiceAI license
-  whose allowed serial list matches the connected or configured TallyPrime
-  serial. The gate must not block upload, review, approval, downloadable
+  whose allowed serial list matches the connected TallyPrime serial or
+  support-only fallback serial.
   exports, or ERPNext export.
-- If TallyPrime does not expose a serial through default HTTP/XML, `.env` may
-  define `TALLY_SERIAL_NUMBER`; that value is still verified against the signed
-  license allow-list.
+- TallyPrime serial verification should probe the connected TallyPrime over
+  HTTP/XML first. The `.env` `TALLY_SERIAL_NUMBER` value is a support-only
+  fallback and is still verified against the signed license allow-list.
 - Vendor, purchase, and GST ledger masters may be synced to TallyPrime, but
   the app relies on the configured ledger names as the stable mapping contract.
+- Customer-editable Tally defaults live in runtime `settings.json`; saved
+  runtime settings override `.env` defaults and affect future Tally actions
+  without requiring an app restart.
+- `DEFAULT_STOCK_GROUP` is customer-editable because item-wise posting may
+  need customer-specific inventory grouping; other Tally master-type constants
+  remain internal code constants.
 - For scanned/image invoices, ERP-safe totals are preferred over unreliable
   item-level detail.
 - Failed AI parsing should still leave an invoice available for pending review.

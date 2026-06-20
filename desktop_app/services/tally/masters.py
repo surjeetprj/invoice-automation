@@ -8,16 +8,8 @@ from datetime import datetime
 from typing import Iterable
 from xml.etree.ElementTree import Element, SubElement, indent, tostring
 
-from ...config import (
-    INPUT_CESS_LEDGER_NAME,
-    INPUT_CGST_LEDGER_NAME,
-    INPUT_IGST_LEDGER_NAME,
-    INPUT_SGST_LEDGER_NAME,
-    PURCHASE_LEDGER_NAME,
-    STATE_CODES,
-    TALLY_COMPANY,
-    TALLY_VENDOR_PARENT_LEDGER,
-)
+from ...config import STATE_CODES
+from ..settings import get_tally_settings
 from ...domain.schemas import InvoiceData, LineItem
 from ...domain.parsing import parse_date
 
@@ -30,7 +22,6 @@ UNIT_MASTER = "Unit Master"
 STOCK_GROUP_MASTER = "Stock Group Master"
 STOCK_ITEM_MASTER = "Stock Item Master"
 
-DEFAULT_STOCK_GROUP = "Primary"
 PURCHASE_VOUCHER_TYPE = "Purchase"
 TALLY_ANY = "\u0004 Any"
 TALLY_NOT_APPLICABLE = "\u0004 Not Applicable"
@@ -70,7 +61,7 @@ def required_purchase_masters(data: InvoiceData) -> list[TallyMaster]:
     """Return masters needed for ledger-only purchase posting."""
     masters = [
         vendor_master_from_invoice(data, action="Create"),
-        TallyMaster(PURCHASE_LEDGER_NAME, PURCHASE_LEDGER, "Purchase Accounts"),
+        TallyMaster(get_tally_settings().purchase_ledger_name, PURCHASE_LEDGER, "Purchase Accounts"),
         *tax_ledger_masters(action="Create"),
         TallyMaster(PURCHASE_VOUCHER_TYPE, VOUCHER_TYPE, PURCHASE_VOUCHER_TYPE),
     ]
@@ -81,7 +72,8 @@ def required_purchase_masters(data: InvoiceData) -> list[TallyMaster]:
 
 def required_inventory_purchase_masters(data: InvoiceData) -> list[TallyMaster]:
     """Return masters needed for inventory-based purchase posting."""
-    masters = [*required_purchase_masters(data), stock_group_master(action="Create")]
+    stock_group = default_stock_group_name()
+    masters = [*required_purchase_masters(data), stock_group_master(stock_group, action="Create")]
     stock_item_masters: list[TallyMaster] = []
     for item in data.line_items:
         unit_master = unit_master_from_line_item(item.unit, action="Create")
@@ -100,7 +92,7 @@ def vendor_master_from_invoice(data: InvoiceData, *, action: str = "Alter") -> T
     return TallyMaster(
         vendor_name,
         VENDOR_LEDGER,
-        TALLY_VENDOR_PARENT_LEDGER,
+        get_tally_settings().tally_vendor_parent_ledger,
         data.vendor_gstin,
         address=data.vendor_address,
         state=vendor_state(data),
@@ -127,9 +119,9 @@ def stock_item_master_from_invoice_item(item: LineItem, data: InvoiceData, *, ac
     return TallyMaster(
         stock_name,
         STOCK_ITEM_MASTER,
-        parent=DEFAULT_STOCK_GROUP,
+        parent=default_stock_group_name(),
         unit_name=unit_name,
-        stock_group=DEFAULT_STOCK_GROUP,
+        stock_group=default_stock_group_name(),
         hsn_sac=(item.hsn_sac or "").strip() or None,
         gst_rates=stock_item_gst_rates(item, data),
         supply_nature=stock_item_supply_nature(item),
@@ -138,9 +130,14 @@ def stock_item_master_from_invoice_item(item: LineItem, data: InvoiceData, *, ac
     )
 
 
-def stock_group_master(name: str = DEFAULT_STOCK_GROUP, *, parent: str | None = None, action: str = "Create") -> TallyMaster:
+def default_stock_group_name() -> str:
+    """Return the runtime-configured default stock group for item-wise posting."""
+    return get_tally_settings().default_stock_group or "Primary"
+
+def stock_group_master(name: str | None = None, *, parent: str | None = None, action: str = "Create") -> TallyMaster:
     """Build a stock group master used by item-wise posting."""
-    return TallyMaster(name, STOCK_GROUP_MASTER, parent=parent, stock_group=name, action=action)
+    group_name = name or default_stock_group_name()
+    return TallyMaster(group_name, STOCK_GROUP_MASTER, parent=parent, stock_group=group_name, action=action)
 
 
 def build_master_import_xml(masters: Iterable[TallyMaster]) -> bytes:
@@ -170,7 +167,7 @@ def build_vendor_master_xml(data: InvoiceData, *, action: str = "Alter") -> byte
 def build_system_ledgers_xml(*, action: str = "Alter") -> bytes:
     """Build XML that creates or enriches purchase and GST tax ledgers."""
     masters = [
-        TallyMaster(PURCHASE_LEDGER_NAME, PURCHASE_LEDGER, "Purchase Accounts", action=action),
+        TallyMaster(get_tally_settings().purchase_ledger_name, PURCHASE_LEDGER, "Purchase Accounts", action=action),
         *tax_ledger_masters(action=action),
     ]
     return build_master_import_xml(masters)
@@ -185,10 +182,10 @@ def build_inventory_stock_items_xml(data: InvoiceData, *, action: str = "Alter")
 def tax_ledger_masters(*, action: str = "Alter") -> list[TallyMaster]:
     """Return configured GST input tax ledger masters."""
     return [
-        TallyMaster(INPUT_CGST_LEDGER_NAME, TAX_LEDGER, "Duties & Taxes", tax_type="CGST", action=action),
-        TallyMaster(INPUT_SGST_LEDGER_NAME, TAX_LEDGER, "Duties & Taxes", tax_type="SGST", action=action),
-        TallyMaster(INPUT_IGST_LEDGER_NAME, TAX_LEDGER, "Duties & Taxes", tax_type="IGST", action=action),
-        TallyMaster(INPUT_CESS_LEDGER_NAME, TAX_LEDGER, "Duties & Taxes", tax_type="Cess", action=action),
+        TallyMaster(get_tally_settings().input_cgst_ledger_name, TAX_LEDGER, "Duties & Taxes", tax_type="CGST", action=action),
+        TallyMaster(get_tally_settings().input_sgst_ledger_name, TAX_LEDGER, "Duties & Taxes", tax_type="SGST", action=action),
+        TallyMaster(get_tally_settings().input_igst_ledger_name, TAX_LEDGER, "Duties & Taxes", tax_type="IGST", action=action),
+        TallyMaster(get_tally_settings().input_cess_ledger_name, TAX_LEDGER, "Duties & Taxes", tax_type="Cess", action=action),
     ]
 
 
@@ -223,9 +220,10 @@ def import_envelope(report_name: str) -> tuple[Element, Element]:
     import_data = SubElement(body, "IMPORTDATA")
     request_desc = SubElement(import_data, "REQUESTDESC")
     add_text(request_desc, "REPORTNAME", report_name)
-    if TALLY_COMPANY:
+    company = get_tally_settings().tally_company
+    if company:
         static = SubElement(request_desc, "STATICVARIABLES")
-        add_text(static, "SVCURRENTCOMPANY", TALLY_COMPANY)
+        add_text(static, "SVCURRENTCOMPANY", company)
     request_data = SubElement(import_data, "REQUESTDATA")
     return envelope, request_data
 
@@ -282,7 +280,7 @@ def build_stock_item(parent: Element, master: TallyMaster) -> Element:
     """Append a Stock Item master XML node."""
     item = SubElement(parent, "STOCKITEM", NAME=master.name, ACTION=master.action)
     add_text(item, "NAME", master.name)
-    add_text(item, "PARENT", master.stock_group or master.parent or DEFAULT_STOCK_GROUP)
+    add_text(item, "PARENT", master.stock_group or master.parent or default_stock_group_name())
     if master.unit_name:
         add_text(item, "BASEUNITS", master.unit_name)
         add_text(item, "VATBASEUNIT", master.unit_name)
@@ -399,8 +397,9 @@ def build_voucher_type(parent: Element, master: TallyMaster) -> Element:
 
 def add_text_if_company(parent: Element) -> None:
     """Add the company static variable when configured."""
-    if TALLY_COMPANY:
-        add_text(parent, "SVCURRENTCOMPANY", TALLY_COMPANY)
+    company = get_tally_settings().tally_company
+    if company:
+        add_text(parent, "SVCURRENTCOMPANY", company)
 
 
 def add_text(parent: Element, tag: str, text: object) -> Element:

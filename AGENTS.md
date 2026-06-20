@@ -31,6 +31,10 @@ Working rules:
 - Keep parsing services in `desktop_app/services/parsing`, document services in
   `desktop_app/services/documents`, and export services in
   `desktop_app/services/exports`.
+- Keep runtime-editable Tally defaults in `desktop_app/services/settings.py`;
+  saved app-data `settings.json` values override `.env` defaults.
+  `DEFAULT_STOCK_GROUP` is included because item-wise posting may need
+  customer-specific inventory grouping.
 - Keep direct TallyPrime HTTP/XML posting services in
   `desktop_app/services/tally`; file-based downloadable exports remain in
   `desktop_app/services/exports`.

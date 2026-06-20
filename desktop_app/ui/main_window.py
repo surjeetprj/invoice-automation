@@ -9,6 +9,8 @@ from typing import Any, Callable
 from PySide6.QtCore import QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QFileDialog,
+    QComboBox,
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -25,6 +27,7 @@ from ..services.workflow import DesktopWorkflow
 from .dashboard_page import DashboardPage
 from .detail_page import DetailPage
 from .invoices_page import InvoicesPage
+from .settings_dialog import SettingsDialog
 from .upload_page import UploadPage
 from .widgets.pdf_preview import render_document_to_images
 from .widgets.worker import Worker, WorkerResult
@@ -45,6 +48,8 @@ class MainWindow(QMainWindow):
         self.current_document_invoice_id: int | None = None
         self.document_request_token = 0
         self.nav_buttons: dict[str, QPushButton] = {}
+        self.current_settings: dict[str, Any] = {}
+        self.loading_settings = False
 
         self.setWindowTitle("Invoice AI Desktop")
         self.resize(1280, 820)
@@ -72,6 +77,7 @@ class MainWindow(QMainWindow):
         self.show_page("dashboard", self.dashboard)
         QTimer.singleShot(0, self.check_health)
         QTimer.singleShot(0, self.load_dashboard)
+        QTimer.singleShot(0, self.load_settings)
 
     def build_top_bar(self) -> QWidget:
         """Create the top bar with app status, navigation, and reviewer name."""
@@ -108,6 +114,23 @@ class MainWindow(QMainWindow):
             self.nav_buttons[key] = button
             layout.addWidget(button)
         layout.addStretch()
+
+        company_label = QLabel("Company")
+        company_label.setObjectName("sectionTitle")
+        self.company_selector = QComboBox()
+        self.company_selector.setEditable(True)
+        self.company_selector.setMinimumWidth(180)
+        self.company_selector.setMaximumWidth(260)
+        self.company_selector.activated.connect(self.save_selected_company)
+        if self.company_selector.lineEdit():
+            self.company_selector.lineEdit().editingFinished.connect(self.save_selected_company)
+        self.settings_btn = QPushButton("Settings")
+        self.settings_btn.setObjectName("navButton")
+        self.settings_btn.setMinimumHeight(34)
+        self.settings_btn.clicked.connect(self.open_settings_dialog)
+        layout.addWidget(company_label)
+        layout.addWidget(self.company_selector)
+        layout.addWidget(self.settings_btn)
 
         reviewer_label = QLabel("Reviewer")
         reviewer_label.setObjectName("sectionTitle")
@@ -186,6 +209,79 @@ class MainWindow(QMainWindow):
             worker.signals.progress.connect(on_progress)
         worker.signals.finished.connect(lambda w=worker: self.active_workers.discard(w))
         self.thread_pool.start(worker)
+
+    def load_settings(self) -> None:
+        """Load runtime settings into top-bar controls without contacting Tally."""
+        def loaded(settings: dict[str, Any]) -> None:
+            self.current_settings = settings.get("tally", {})
+            self.set_company_selector(self.current_settings.get("tally_company", ""))
+
+        self.run_task(self.workflow.get_settings, loaded)
+
+    def set_company_selector(self, company: str) -> None:
+        """Show the active Tally company in the top bar."""
+        self.loading_settings = True
+        try:
+            current_values = [self.company_selector.itemText(index) for index in range(self.company_selector.count())]
+            if company and company not in current_values:
+                self.company_selector.addItem(company)
+            self.company_selector.setCurrentText(company or "")
+        finally:
+            self.loading_settings = False
+
+    def save_selected_company(self, *_args: Any) -> None:
+        """Persist the company selected or typed in the top bar."""
+        if self.loading_settings:
+            return
+        company = self.company_selector.currentText().strip()
+        if company == str(self.current_settings.get("tally_company") or ""):
+            return
+        payload = dict(self.current_settings)
+        payload["tally_company"] = company
+
+        def saved(settings: dict[str, Any]) -> None:
+            self.current_settings = settings.get("tally", {})
+            self.set_company_selector(self.current_settings.get("tally_company", ""))
+
+        self.run_task(self.workflow.save_settings, saved, {"tally": payload})
+
+    def open_settings_dialog(self) -> None:
+        """Open Tally settings dialog and persist accepted edits."""
+        dialog = SettingsDialog(self)
+        dialog.load_settings(self.current_settings)
+
+        def refresh_companies() -> None:
+            def loaded(companies: list[str]) -> None:
+                dialog.set_companies(companies)
+                QMessageBox.information(dialog, "TallyPrime", f"Loaded {len(companies)} compan{'y' if len(companies) == 1 else 'ies'}.")
+
+            self.run_task(self.workflow.list_tally_companies, loaded, on_error=lambda err: QMessageBox.warning(dialog, "TallyPrime", err))
+
+        def test_connection() -> None:
+            def tested(result: dict[str, Any]) -> None:
+                serial = result.get("serial_number") or "not available"
+                companies = result.get("companies") or []
+                if companies:
+                    dialog.set_companies([str(company) for company in companies])
+                QMessageBox.information(dialog, "TallyPrime", f"Connection verified. Serial: {serial}")
+
+            self.run_task(
+                self.workflow.test_tally_settings,
+                tested,
+                {"tally": dialog.settings_payload()},
+                on_error=lambda err: QMessageBox.warning(dialog, "TallyPrime", err),
+            )
+
+        dialog.refresh_companies_btn.clicked.connect(refresh_companies)
+        dialog.test_connection_btn.clicked.connect(test_connection)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        def saved(settings: dict[str, Any]) -> None:
+            self.current_settings = settings.get("tally", {})
+            self.set_company_selector(self.current_settings.get("tally_company", ""))
+
+        self.run_task(self.workflow.save_settings, saved, {"tally": dialog.settings_payload()})
 
     def check_health(self) -> None:
         """Refresh the top-bar readiness indicator."""

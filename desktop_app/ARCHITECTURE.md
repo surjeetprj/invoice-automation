@@ -50,6 +50,7 @@ invoice remains available for review.
 - `db/migrations.py`: safe startup migration for legacy JSON-based SQLite DBs.
 - `services/exports/exporters.py`: CSV, JSON, downloadable Tally XML, and
   ERPNext purchase exports.
+- `services/settings.py`: runtime-editable Tally defaults stored in app-data JSON.
 - `services/tally/`: local TallyPrime HTTP/XML client, controlled master XML,
   ledger-only and item-wise purchase voucher XML, inventory master XML, and
   response parsing for direct posting.
@@ -73,7 +74,9 @@ payload with supplier, item rows, and GST tax rows.
 
 Downloadable exports stay in `services/exports`. Direct posting to a locally
 running TallyPrime instance is handled by `services/tally` and orchestrated by
-`DesktopWorkflow`.
+`DesktopWorkflow`. Customer-editable Tally settings are stored in runtime
+`settings.json`; saved values override `.env` defaults without app restart for
+future direct Tally actions.
 
 Direct TallyPrime posting has two explicit modes:
 
@@ -98,7 +101,7 @@ Both modes follow a controlled flow:
 
 Master creation is intentionally controlled. Vendor ledgers are created under
 `Sundry Creditors`, purchase ledgers under `Purchase Accounts`, input tax
-ledgers under `Duties & Taxes`, stock items under `Primary`, and units as simple
+ledgers under `Duties & Taxes`, stock items under the configured default stock group, and units as simple
 units. Item-wise posting is blocked before any Tally voucher request when
 required line-item fields are missing or invalid, rather than silently
 downgrading to ledger-only posting.
@@ -128,9 +131,10 @@ this license gate.
 
 The license file defaults to the app runtime directory as
 `invoiceai_license.json`, or `INVOICEAI_LICENSE_FILE` may point to a custom path.
-Some TallyPrime installations do not expose the serial number through the default
-HTTP/XML response; in that case `TALLY_SERIAL_NUMBER` in `.env` is used as a
-fallback and is still checked against the signed license.
+InvoiceAI first probes TallyPrime over HTTP/XML for the connected serial. If an
+installation still cannot expose the serial, the hidden `.env` fallback
+`TALLY_SERIAL_NUMBER` may be used by support and is still checked against the
+signed license.
 
 License files are signed with Ed25519. The app embeds only the public key. The
 private signing key and generated customer license files must remain outside git.

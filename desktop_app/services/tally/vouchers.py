@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from xml.etree.ElementTree import Element, SubElement, indent, tostring
 
-from ...config import PURCHASE_LEDGER_NAME, TALLY_COMPANY
+from ..settings import get_tally_settings
 from ...domain.parsing import parse_date
 from ...domain.schemas import InvoiceData, SupplyType
-from ..exports.exporters import tally_tax_ledgers, tax_components_for_item
+from ..exports.exporters import invoice_tax_totals, tax_components_for_item
 from .masters import (
     PURCHASE_VOUCHER_TYPE,
     TALLY_NOT_APPLICABLE,
@@ -33,7 +33,7 @@ def build_purchase_voucher_xml(invoice_id: int, data: InvoiceData) -> bytes:
     add_text(voucher, "PERSISTEDVIEW", ACCOUNTING_VOUCHER_VIEW)
     add_text(voucher, "ISINVOICE", "No")
     add_ledger_entry(voucher, vendor_display_name(data), -abs(data.total_amount), deemed_positive=True)
-    purchase_entry = add_ledger_entry(voucher, PURCHASE_LEDGER_NAME, data.total_taxable_amount, deemed_positive=False)
+    purchase_entry = add_ledger_entry(voucher, get_tally_settings().purchase_ledger_name, data.total_taxable_amount, deemed_positive=False)
     if can_post_detailed_gst(data):
         add_purchase_gst_details(purchase_entry, data, tally_date(data.date))
     for name, amount in tally_tax_ledgers(data):
@@ -55,9 +55,10 @@ def build_inventory_purchase_voucher_xml(invoice_id: int, data: InvoiceData) -> 
     add_text(voucher, "PARTYNAME", vendor_display_name(data))
     add_text(voucher, "BASICBASEPARTYNAME", vendor_display_name(data))
     add_text(voucher, "PARTYMAILINGNAME", vendor_display_name(data))
-    if TALLY_COMPANY:
-        add_text(voucher, "BASICBUYERNAME", TALLY_COMPANY)
-        add_text(voucher, "CONSIGNEEMAILINGNAME", TALLY_COMPANY)
+    company = get_tally_settings().tally_company
+    if company:
+        add_text(voucher, "BASICBUYERNAME", company)
+        add_text(voucher, "CONSIGNEEMAILINGNAME", company)
         add_text(voucher, "CONSIGNEECOUNTRYNAME", "India")
     state_name = vendor_state(data)
     if state_name:
@@ -102,7 +103,7 @@ def build_inventory_purchase_voucher_xml(invoice_id: int, data: InvoiceData) -> 
         add_text(batch, "ACTUALQTY", quantity_text(item.quantity, unit_name))
         add_text(batch, "BILLEDQTY", quantity_text(item.quantity, unit_name))
         allocation = SubElement(inventory_entry, "ACCOUNTINGALLOCATIONS.LIST")
-        add_text(allocation, "LEDGERNAME", PURCHASE_LEDGER_NAME)
+        add_text(allocation, "LEDGERNAME", get_tally_settings().purchase_ledger_name)
         add_text(allocation, "ISDEEMEDPOSITIVE", "Yes")
         add_text(allocation, "AMOUNT", f"-{abs(item.taxable_value):.2f}")
         for duty_head, rate in item_gst_rate_details(item, data):
@@ -135,9 +136,10 @@ def build_voucher_envelope(invoice_id: int, data: InvoiceData, *, objview: str) 
     import_data = SubElement(body, "IMPORTDATA")
     request_desc = SubElement(import_data, "REQUESTDESC")
     add_text(request_desc, "REPORTNAME", "Vouchers")
-    if TALLY_COMPANY:
+    company = get_tally_settings().tally_company
+    if company:
         static = SubElement(request_desc, "STATICVARIABLES")
-        add_text(static, "SVCURRENTCOMPANY", TALLY_COMPANY)
+        add_text(static, "SVCURRENTCOMPANY", company)
     request_data = SubElement(import_data, "REQUESTDATA")
     tally_message = SubElement(request_data, "TALLYMESSAGE")
     voucher = SubElement(tally_message, "VOUCHER", VCHTYPE=PURCHASE_VOUCHER_TYPE, ACTION="Create", OBJVIEW=objview)
@@ -195,6 +197,17 @@ def add_item_tax_ledger_entry(voucher: Element, ledger_name: str, amount: float,
     return entry
 
 
+
+def tally_tax_ledgers(data: InvoiceData) -> tuple[tuple[str, float], ...]:
+    """Return runtime-configured Tally input tax ledger names and amounts."""
+    settings = get_tally_settings()
+    totals = invoice_tax_totals(data)
+    return (
+        (settings.input_cgst_ledger_name, totals["CGST"]),
+        (settings.input_sgst_ledger_name, totals["SGST"]),
+        (settings.input_igst_ledger_name, totals["IGST"]),
+        (settings.input_cess_ledger_name, totals["CESS"]),
+    )
 def invoice_reference(data: InvoiceData, invoice_id: int) -> str:
     """Return the invoice reference used across Tally voucher fields."""
     return data.invoice_number or f"Invoice-{invoice_id}"
