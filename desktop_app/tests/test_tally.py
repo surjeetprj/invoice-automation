@@ -13,7 +13,8 @@ from desktop_app.db.models import AuditLog, Base, Invoice
 from desktop_app.db.repository import persist_extraction
 from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail, ValidationResult
 from desktop_app.services.tally import TallyClient
-from desktop_app.services.tally.client import TallyPreflight, annotate_tally_response, build_tally_identity_xml, merge_tally_responses, parse_tally_serial_number
+from desktop_app.services.settings import TallySettings
+from desktop_app.services.tally.client import TallyPreflight, annotate_tally_response, build_tally_identity_xml, build_tally_license_info_xml, merge_tally_responses, parse_tally_serial_number
 from desktop_app.services.tally.masters import (
     build_inventory_stock_items_xml,
     TallyMaster,
@@ -114,23 +115,114 @@ class TallyServiceTests(unittest.TestCase):
         </COLLECTION></DATA></BODY></ENVELOPE>
         """
         self.assertEqual(parse_tally_serial_number(xml), "TALLY-12345")
+        self.assertEqual(parse_tally_serial_number("<GETSERIALFIELD>Serial Number TALLY-24680</GETSERIALFIELD>"), "TALLY-24680")
         self.assertEqual(parse_tally_serial_number("<COMPANY><LICENSESERIALNUMBER>Serial Number TALLY-67890</LICENSESERIALNUMBER></COMPANY>"), "TALLY-67890")
         self.assertIn(b"InvoiceAITallyIdentity", build_tally_identity_xml())
+        license_xml = build_tally_license_info_xml("Runtime Company")
+        self.assertIn(b"SVCURRENTCOMPANY", license_xml)
+        self.assertIn(b"Runtime Company", license_xml)
+        self.assertIn(b"$$LicenseInfo:SerialNumber", license_xml)
+        self.assertIn(b"<TYPE>DATA</TYPE>", license_xml)
+        self.assertIn(b"InvoiceAILicenseInfoReport", license_xml)
+
+    def test_tally_client_uses_license_info_probe_first(self) -> None:
+        """The TDL LicenseInfo report probe should be preferred for connected serial verification."""
+        client = TallyClient(serial_number="")
+        with self.assertLogs("desktop_app.services.tally.client", level="INFO") as logs:
+            with patch.object(client, "post_xml", return_value="<GETSERIALFIELD>TALLY-12345</GETSERIALFIELD>") as post_xml:
+                self.assertEqual(client.fetch_tally_serial_number(), "TALLY-12345")
+
+        self.assertEqual(post_xml.call_count, 1)
+        self.assertIn(b"$$LicenseInfo:SerialNumber", post_xml.call_args.args[0])
+        self.assertIn("Tally serial verified using LicenseInfo TDL report probe", "\n".join(logs.output))
+
+    def test_tally_client_falls_back_to_identity_probe(self) -> None:
+        """Company collection identity probe should be used when LicenseInfo returns no serial."""
+        client = TallyClient(serial_number="")
+        with self.assertLogs("desktop_app.services.tally.client", level="INFO") as logs:
+            with patch.object(
+                client,
+                "post_xml",
+                side_effect=[
+                    "<ENVELOPE><BODY><DATA /></BODY></ENVELOPE>",
+                    "<ENVELOPE><COMPANY><LICENSESERIALNUMBER>TALLY-67890</LICENSESERIALNUMBER></COMPANY></ENVELOPE>",
+                ],
+            ) as post_xml:
+                self.assertEqual(client.fetch_tally_serial_number(), "TALLY-67890")
+
+        self.assertEqual(post_xml.call_count, 2)
+        self.assertIn(b"$$LicenseInfo:SerialNumber", post_xml.call_args_list[0].args[0])
+        self.assertIn(b"InvoiceAITallyIdentity", post_xml.call_args_list[1].args[0])
+        self.assertIn("Tally serial verified using Company collection identity probe", "\n".join(logs.output))
 
     def test_tally_client_uses_configured_serial_when_tally_does_not_expose_one(self) -> None:
-        """Configured serial fallback should keep Tally exports usable when HTTP omits serial fields."""
-        client = TallyClient()
-        with patch("desktop_app.services.tally.client.TALLY_SERIAL_NUMBER", "TALLY-12345"):
-            with patch.object(client, "post_xml", return_value="<ENVELOPE><COMPANY><NAME>Demo</NAME></COMPANY></ENVELOPE>"):
+        """Hidden .env serial fallback should remain available after both HTTP probes fail."""
+        client = TallyClient(serial_number="TALLY-12345")
+        with self.assertLogs("desktop_app.services.tally.client", level="WARNING") as logs:
+            with patch.object(
+                client,
+                "post_xml",
+                side_effect=[
+                    "<ENVELOPE><COMPANY><NAME>Demo</NAME></COMPANY></ENVELOPE>",
+                    "<ENVELOPE><COMPANY><NAME>Demo</NAME></COMPANY></ENVELOPE>",
+                ],
+            ) as post_xml:
                 self.assertEqual(client.fetch_tally_serial_number(), "TALLY-12345")
+
+        self.assertEqual(post_xml.call_count, 2)
+        self.assertIn("support-only .env fallback", "\n".join(logs.output))
 
     def test_tally_client_fails_closed_when_serial_missing(self) -> None:
         """Missing serial fields should block TallyPrime export when no fallback is configured."""
-        client = TallyClient()
-        with patch("desktop_app.services.tally.client.TALLY_SERIAL_NUMBER", ""):
-            with patch.object(client, "post_xml", return_value="<ENVELOPE><COMPANY><NAME>Demo</NAME></COMPANY></ENVELOPE>"):
-                with self.assertRaisesRegex(ConnectionError, "TALLY_SERIAL_NUMBER is not configured"):
-                    client.fetch_tally_serial_number()
+        client = TallyClient(serial_number="")
+        with patch.object(
+            client,
+            "post_xml",
+            side_effect=[
+                "<ENVELOPE><COMPANY><NAME>Demo</NAME></COMPANY></ENVELOPE>",
+                "<ENVELOPE><COMPANY><NAME>Demo</NAME></COMPANY></ENVELOPE>",
+            ],
+        ):
+            with self.assertRaisesRegex(ConnectionError, "Could not verify TallyPrime serial number"):
+                client.fetch_tally_serial_number()
+
+    def test_direct_tally_master_xml_uses_runtime_settings(self) -> None:
+        """Direct Tally master XML should use runtime company and ledger names."""
+        settings = TallySettings(
+            tally_company="Runtime Company",
+            tally_vendor_parent_ledger="Custom Creditors",
+            purchase_ledger_name="Runtime Purchase",
+            input_cgst_ledger_name="Runtime CGST",
+            input_sgst_ledger_name="Runtime SGST",
+            input_igst_ledger_name="Runtime IGST",
+            input_cess_ledger_name="Runtime CESS",
+        )
+        with patch("desktop_app.services.tally.masters.get_tally_settings", return_value=settings):
+            masters = required_purchase_masters(self.sample_invoice_data())
+            xml = build_master_import_xml(masters).decode("utf-8")
+
+        self.assertIn("<SVCURRENTCOMPANY>Runtime Company</SVCURRENTCOMPANY>", xml)
+        self.assertIn('<LEDGER NAME="Runtime Purchase" ACTION="Create">', xml)
+        self.assertIn('<LEDGER NAME="Runtime CGST" ACTION="Create">', xml)
+        self.assertIn("<PARENT>Custom Creditors</PARENT>", xml)
+
+    def test_direct_tally_voucher_xml_uses_runtime_settings(self) -> None:
+        """Direct Tally voucher XML should use runtime company and ledger names."""
+        settings = TallySettings(
+            tally_company="Runtime Company",
+            purchase_ledger_name="Runtime Purchase",
+            input_cgst_ledger_name="Runtime CGST",
+            input_sgst_ledger_name="Runtime SGST",
+            input_igst_ledger_name="Runtime IGST",
+            input_cess_ledger_name="Runtime CESS",
+        )
+        with patch("desktop_app.services.tally.vouchers.get_tally_settings", return_value=settings):
+            xml = build_purchase_voucher_xml(1, self.sample_invoice_data()).decode("utf-8")
+
+        self.assertIn("<SVCURRENTCOMPANY>Runtime Company</SVCURRENTCOMPANY>", xml)
+        self.assertIn("<LEDGERNAME>Runtime Purchase</LEDGERNAME>", xml)
+        self.assertIn("<LEDGERNAME>Runtime CGST</LEDGERNAME>", xml)
+        self.assertIn("<LEDGERNAME>Runtime SGST</LEDGERNAME>", xml)
 
     def test_master_xml_includes_vendor_purchase_and_tax_ledgers(self) -> None:
         """Master XML should create controlled ledgers under the right parents."""
@@ -161,6 +253,17 @@ class TallyServiceTests(unittest.TestCase):
         self.assertIn("<GSTTYPE>CGST</GSTTYPE>", xml)
         self.assertIn("<GSTDUTYHEAD>CGST</GSTDUTYHEAD>", xml)
         self.assertIn("<ISINPUTCREDIT>Yes</ISINPUTCREDIT>", xml)
+
+    def test_inventory_master_xml_uses_runtime_stock_group(self) -> None:
+        """Item-wise Tally masters should use the runtime default stock group."""
+        settings = TallySettings(default_stock_group="Software Services")
+        with patch("desktop_app.services.tally.masters.get_tally_settings", return_value=settings):
+            masters = required_inventory_purchase_masters(self.sample_invoice_data())
+            xml = build_master_import_xml(masters).decode("utf-8")
+
+        self.assertIn('<STOCKGROUP NAME="Software Services" ACTION="Create">', xml)
+        self.assertIn("<PARENT>Software Services</PARENT>", xml)
+
 
     def test_inventory_master_xml_includes_unit_and_stock_item(self) -> None:
         """Inventory posting should preflight reviewed units and stock items."""

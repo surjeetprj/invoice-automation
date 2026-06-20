@@ -3,6 +3,7 @@ from __future__ import annotations
 """HTTP/XML client for local TallyPrime direct posting."""
 
 from dataclasses import dataclass
+import logging
 import re
 from typing import Iterable
 from xml.etree import ElementTree
@@ -10,7 +11,8 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 
 import requests
 
-from ...config import TALLY_SERIAL_NUMBER, TALLY_TIMEOUT_SECONDS, TALLY_URL
+from ...config import TALLY_SERIAL_NUMBER
+from ..settings import get_tally_settings
 from ...domain.schemas import InvoiceData
 from .masters import (
     STOCK_GROUP_MASTER,
@@ -28,6 +30,8 @@ from .masters import (
 )
 from .responses import TallyResponse, parse_tally_response
 from .vouchers import build_inventory_purchase_voucher_xml, build_purchase_voucher_xml, gst_amount_details
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -59,9 +63,11 @@ class TallyPostResult:
 class TallyClient:
     """Small TallyPrime HTTP/XML client."""
 
-    def __init__(self, url: str = TALLY_URL, timeout: int = TALLY_TIMEOUT_SECONDS) -> None:
-        self.url = url
-        self.timeout = timeout
+    def __init__(self, url: str | None = None, timeout: int | None = None, serial_number: str | None = None) -> None:
+        settings = get_tally_settings()
+        self.url = url or settings.tally_url
+        self.timeout = timeout or settings.tally_timeout_seconds
+        self.serial_number = serial_number if serial_number is not None else TALLY_SERIAL_NUMBER
 
     def post_xml(self, xml: bytes) -> str:
         """POST native Tally XML to the local TallyPrime HTTP server."""
@@ -78,20 +84,44 @@ class TallyClient:
             raise ConnectionError(f"Could not connect to TallyPrime at {self.url}: {exc}") from exc
 
     def fetch_tally_serial_number(self) -> str:
-        """Return the connected or configured TallyPrime serial number or fail closed."""
+        """Return the connected TallyPrime serial or support-only fallback."""
+        logger.info("Tally serial verification started")
+        logger.info("Tally serial probe started: LicenseInfo TDL report")
+        raw = self.post_xml(build_tally_license_info_xml())
+        serial = parse_tally_serial_number(raw)
+        if serial:
+            logger.info("Tally serial verified using LicenseInfo TDL report probe: %s", mask_serial(serial))
+            return serial
+
+        logger.info("Tally serial probe did not return a serial: LicenseInfo TDL report | response=%s", tally_response_summary(raw))
+        logger.info("Tally serial probe started: Company collection identity")
         raw = self.post_xml(build_tally_identity_xml())
-        serial = parse_tally_serial_number(raw) or configured_tally_serial_number()
-        if not serial:
-            raise ConnectionError(
-                "Could not verify TallyPrime serial number. TallyPrime did not expose a serial through "
-                "the local HTTP/XML response, and TALLY_SERIAL_NUMBER is not configured. "
-                "TallyPrime export is blocked for this license."
-            )
-        return serial
+        serial = parse_tally_serial_number(raw)
+        if serial:
+            logger.info("Tally serial verified using Company collection identity probe: %s", mask_serial(serial))
+            return serial
+
+        logger.info("Tally serial probe did not return a serial: Company collection identity | response=%s", tally_response_summary(raw))
+        serial = configured_tally_serial_number(self.serial_number)
+        if serial:
+            logger.warning("Tally serial verified using support-only .env fallback: %s", mask_serial(serial))
+            return serial
+
+        logger.error("Tally serial verification failed: no serial returned by Tally probes and no support fallback configured")
+        raise ConnectionError(
+            "Could not verify TallyPrime serial number. TallyPrime did not expose a serial through "
+            "the local HTTP/XML response, and TALLY_SERIAL_NUMBER is not configured. "
+            "TallyPrime export is blocked for this license."
+        )
 
     def check_connection(self) -> None:
         """Raise if the TallyPrime HTTP endpoint cannot be reached."""
         self.fetch_master_names("InvoiceAIConnectionCheck", "Company")
+
+    def fetch_company_names(self) -> set[str]:
+        """Fetch available company names from TallyPrime."""
+        raw = self.post_xml(build_tally_companies_xml())
+        return parse_master_names(raw)
 
     def fetch_master_names(self, collection_name: str, master_type: str) -> set[str]:
         """Fetch master names for a Tally collection type."""
@@ -291,13 +321,80 @@ TALLY_SERIAL_FIELD_NAMES = {
     "TALLYNETSERIALNUMBER",
     "TALLYLICENSESERIALNUMBER",
     "ACCOUNTID",
+    "GETSERIALFIELD",
 }
 
 
-def configured_tally_serial_number() -> str | None:
-    """Return the optional configured Tally serial fallback."""
-    serial = str(TALLY_SERIAL_NUMBER or "").strip()
+def configured_tally_serial_number(value: str | None) -> str | None:
+    """Return the hidden support-only Tally serial fallback."""
+    serial = str(value or "").strip()
     return serial or None
+
+
+
+def mask_serial(value: str | None) -> str:
+    """Return a log-safe Tally serial representation."""
+    serial = str(value or "").strip()
+    if len(serial) <= 4:
+        return "****" if serial else ""
+    return f"***{serial[-4:]}"
+
+
+def tally_response_summary(value: str | None, *, limit: int = 220) -> str:
+    """Return a compact one-line Tally response snippet for probe diagnostics."""
+    text = " ".join(str(value or "").split())
+    if not text:
+        return "<empty>"
+    return text if len(text) <= limit else text[:limit] + "..."
+
+def build_tally_companies_xml() -> bytes:
+    """Build a Tally collection export request for all company names."""
+    envelope = Element("ENVELOPE")
+    header = SubElement(envelope, "HEADER")
+    SubElement(header, "VERSION").text = "1"
+    SubElement(header, "TALLYREQUEST").text = "Export"
+    SubElement(header, "TYPE").text = "Collection"
+    SubElement(header, "ID").text = "InvoiceAICompanies"
+    body = SubElement(envelope, "BODY")
+    desc = SubElement(body, "DESC")
+    static = SubElement(desc, "STATICVARIABLES")
+    SubElement(static, "SVEXPORTFORMAT").text = "$$SysName:XML"
+    tdl = SubElement(desc, "TDL")
+    message = SubElement(tdl, "TDLMESSAGE")
+    collection = SubElement(message, "COLLECTION", NAME="InvoiceAICompanies", ISMODIFY="No")
+    SubElement(collection, "TYPE").text = "Company"
+    SubElement(collection, "FETCH").text = "NAME"
+    return tostring(envelope, encoding="utf-8", xml_declaration=True)
+
+
+def build_tally_license_info_xml(company: str | None = None) -> bytes:
+    """Build a TDL report export request for TallyPrime license serial information."""
+    selected_company = get_tally_settings().tally_company if company is None else company
+    envelope = Element("ENVELOPE")
+    header = SubElement(envelope, "HEADER")
+    SubElement(header, "VERSION").text = "1"
+    SubElement(header, "TALLYREQUEST").text = "Export"
+    SubElement(header, "TYPE").text = "DATA"
+    SubElement(header, "ID").text = "InvoiceAILicenseInfoReport"
+    body = SubElement(envelope, "BODY")
+    desc = SubElement(body, "DESC")
+    static = SubElement(desc, "STATICVARIABLES")
+    SubElement(static, "SVEXPORTFORMAT").text = "$$SysName:XML"
+    if selected_company:
+        SubElement(static, "SVCURRENTCOMPANY").text = selected_company
+    tdl = SubElement(desc, "TDL")
+    message = SubElement(tdl, "TDLMESSAGE")
+    report = SubElement(message, "REPORT", NAME="InvoiceAILicenseInfoReport")
+    SubElement(report, "FORMS").text = "InvoiceAILicenseInfoForm"
+    form = SubElement(message, "FORM", NAME="InvoiceAILicenseInfoForm")
+    SubElement(form, "PARTS").text = "InvoiceAILicenseInfoPart"
+    part = SubElement(message, "PART", NAME="InvoiceAILicenseInfoPart")
+    SubElement(part, "LINES").text = "InvoiceAILicenseInfoLine"
+    line = SubElement(message, "LINE", NAME="InvoiceAILicenseInfoLine")
+    SubElement(line, "FIELDS").text = "GetSerialField"
+    field = SubElement(message, "FIELD", NAME="GetSerialField")
+    SubElement(field, "SET").text = "$$LicenseInfo:SerialNumber"
+    return tostring(envelope, encoding="utf-8", xml_declaration=True)
 
 
 def build_tally_identity_xml() -> bytes:
@@ -325,7 +422,7 @@ def parse_tally_serial_number(xml_text: str) -> str | None:
     try:
         root = ElementTree.fromstring(xml_text.strip())
     except ElementTree.ParseError:
-        return None
+        return serial_value(xml_text) if "serial" in str(xml_text or "").lower() else None
     for element in root.iter():
         for attr_name, attr_value in element.attrib.items():
             if is_serial_field(attr_name) and serial_value(attr_value):
