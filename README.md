@@ -96,9 +96,13 @@ The Export Data menu supports file-based exports and direct TallyPrime posting:
 Direct TallyPrime posting requires TallyPrime to be running locally with the
 target company open and HTTP enabled, usually at `http://localhost:9000`.
 The top bar includes a Company selector and Settings button for customer-editable
-Tally defaults, including the default stock group for item-wise posting.
-Settings are saved locally in `InvoiceAI\settings.json` under the app-data
-directory and override `.env` defaults for future Tally sync/post actions.
+Tally defaults, including the Stock Group for item-wise posting.
+Tally URL, timeout, and license file are saved globally in `InvoiceAI\settings.json`.
+Ledger mapping values, including `Vender A/C Group` and `Stock Group`, are saved per selected company. The Settings
+dialog can refresh Tally ledgers and stock groups into editable dropdowns, so
+users can select existing masters or type names that should be created later.
+Refreshing ledger/group choices does not clear mapping fields: existing saved values
+are preserved, and companies without saved mappings fall back to `.env`/config defaults.
 Before any direct Tally sync/post, InvoiceAI verifies that the selected company
 is returned by the running TallyPrime instance. If the company is blank, typed
 wrongly, or not open/loaded in TallyPrime, export is blocked before masters or

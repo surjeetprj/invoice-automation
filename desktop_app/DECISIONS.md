@@ -57,10 +57,14 @@
   create masters or vouchers in another company.
 - Vendor, purchase, and GST ledger masters may be synced to TallyPrime, but
   the app relies on the configured ledger names as the stable mapping contract.
-- Customer-editable Tally defaults live in runtime `settings.json`; saved
-  runtime settings override `.env` defaults and affect future Tally actions
-  without requiring an app restart.
-- `DEFAULT_STOCK_GROUP` is customer-editable because item-wise posting may
+- Customer-editable Tally defaults live in runtime `settings.json`; Tally URL,
+  timeout, and license file are global, while ledger mapping values like
+  `Vender A/C Group` and `Stock Group` are saved per selected company.
+- Settings should prefer Tally-provided dropdown choices for ledger mappings and Stock
+  groups while remaining editable for intentional master creation.
+- Refreshing Tally ledger/group dropdowns must not clear mapping fields; preserve
+  saved/current values and fall back to `.env`/config defaults for new companies.
+- `DEFAULT_STOCK_GROUP` backs the customer-editable `Stock Group` field because item-wise posting may
   need customer-specific inventory grouping; other Tally master-type constants
   remain internal code constants.
 - For scanned/image invoices, ERP-safe totals are preferred over unreliable

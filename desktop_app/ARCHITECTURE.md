@@ -75,8 +75,11 @@ payload with supplier, item rows, and GST tax rows.
 Downloadable exports stay in `services/exports`. Direct posting to a locally
 running TallyPrime instance is handled by `services/tally` and orchestrated by
 `DesktopWorkflow`. Customer-editable Tally settings are stored in runtime
-`settings.json`; saved values override `.env` defaults without app restart for
-future direct Tally actions.
+`settings.json` as global connection settings plus per-company ledger mappings such as `Vender A/C Group` and `Stock Group`.
+The Settings dialog can query TallyPrime for company, ledger, and stock group
+choices without requiring users to type existing master names manually. Master
+refreshes populate dropdown choices only; they preserve the current mapping values
+and use `.env`/config defaults when a company has no saved mapping yet.
 
 Direct TallyPrime posting has two explicit modes:
 
@@ -102,8 +105,8 @@ Both modes follow a controlled flow:
 
 Master creation is intentionally controlled. Vendor ledgers are created under
 `Sundry Creditors`, purchase ledgers under `Purchase Accounts`, input tax
-ledgers under `Duties & Taxes`, stock items under the configured default stock
-group, and units as simple units. Item-wise posting is blocked before any Tally
+ledgers under `Duties & Taxes`, stock items under the configured Stock
+Group, and units as simple units. Item-wise posting is blocked before any Tally
 voucher request when required line-item fields are missing or invalid, rather
 than silently downgrading to ledger-only posting.
 
