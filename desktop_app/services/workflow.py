@@ -3,7 +3,6 @@ from __future__ import annotations
 """In-process application workflow used by the PySide6 desktop UI."""
 
 import logging
-import hashlib
 import shutil
 import time
 from datetime import datetime, timezone
@@ -33,12 +32,14 @@ from ..domain.schemas import (
 from .documents.document_source import DocumentKind, classify_document, validate_upload_file
 from .documents.extraction import ScannedDocumentException
 from .exports.exporters import export_invoice_csv, export_invoice_json, export_invoice_tally, export_to_erpnext
-from .licensing import assert_tally_serial_allowed
 from .parsing.ai_client import AIRateLimitError
 from .parsing.ai_parser import extract_invoice_source_text, parse_invoice, parse_invoice_file
-from .settings import build_tally_settings, get_tally_settings, get_tally_settings_payload, license_file_path, save_tally_settings
+from .settings import build_tally_settings, get_tally_settings, get_tally_settings_payload, save_tally_settings
 from .tally import TallyClient
-from .tally.client import mask_serial
+from .workflow_pipeline import document_kind_label, sha256_file
+from .workflow_review import apply_review_decision, ensure_review_allowed
+from .workflow_tally import assert_tally_company_selected as verify_tally_company_selected
+from .workflow_tally import assert_tally_license as verify_tally_license
 from ..domain.validation import calculate_confidence_score, validate_invoice
 
 logger = logging.getLogger(__name__)
@@ -236,48 +237,15 @@ class DesktopWorkflow:
         logger.info("Review submitted for invoice #%s: %s", invoice_id, review.decision.value)
         with session_scope() as db:
             invoice = self.require_invoice(db, invoice_id)
-            reviewable_statuses = {InvoiceStatus.PENDING_REVIEW, InvoiceStatus.EXTRACTED, InvoiceStatus.REJECTED}
-            correction_statuses = reviewable_statuses | {InvoiceStatus.APPROVED, InvoiceStatus.POSTED}
-            if review.decision == ReviewDecision.SAVE_CORRECTIONS:
-                if invoice.status not in correction_statuses:
-                    raise ValueError(f"Cannot save corrections for invoice in '{invoice.status}' status")
-            elif invoice.status not in reviewable_statuses:
-                raise ValueError(f"Cannot review invoice in '{invoice.status}' status")
+            ensure_review_allowed(invoice, review.decision)
             now = datetime.now(timezone.utc)
-            if review.decision == ReviewDecision.APPROVE:
-                invoice.status = InvoiceStatus.APPROVED
-                invoice.reviewed_by = review.reviewer
-                invoice.reviewed_at = now
-                self.log(db, invoice.id, "HITL: Invoice APPROVED - status set to Approved", user=review.reviewer)
-            elif review.decision in {ReviewDecision.SAVE_CORRECTIONS, ReviewDecision.APPROVE_WITH_CORRECTIONS}:
-                current_data = invoice_data_from_invoice(invoice) or InvoiceData()
-                current = current_data.model_dump(mode="json")
-                changed = []
-                for field, value in (review.corrections or {}).items():
-                    if current.get(field) != value:
-                        self.log(db, invoice.id, f"HITL: Field '{field}' corrected", reason="Manual correction during review", user=review.reviewer)
-                        current[field] = value
-                        changed.append(field)
-                data = InvoiceData(**current)
-                raw_markdown = raw_markdown_from_invoice(invoice)
-                validation = validate_invoice(data, raw_markdown)
-                document_kind = invoice.extraction.document_kind if invoice.extraction else None
-                mime_type = invoice.extraction.mime_type if invoice.extraction else None
-                persist_extraction(db, invoice, data, validation, raw_markdown, document_kind=document_kind, mime_type=mime_type)
-                if review.decision == ReviewDecision.SAVE_CORRECTIONS:
-                    self.log(db, invoice.id, f"HITL: Corrections saved - {len(changed)} field(s) changed", user=review.reviewer)
-                else:
-                    invoice.status = InvoiceStatus.APPROVED
-                    invoice.reviewed_by = review.reviewer
-                    invoice.reviewed_at = now
-                    self.log(db, invoice.id, f"HITL: Invoice APPROVED WITH CORRECTIONS - {len(changed)} field(s) changed", user=review.reviewer)
-            elif review.decision == ReviewDecision.REJECT:
-                reason = review.rejection_reason or "No reason provided"
-                invoice.status = InvoiceStatus.REJECTED
-                invoice.reviewed_by = review.reviewer
-                invoice.reviewed_at = now
-                invoice.rejection_reason = reason
-                self.log(db, invoice.id, f"HITL: Invoice REJECTED - {reason}", reason=reason, user=review.reviewer)
+            apply_review_decision(
+                db,
+                invoice,
+                review,
+                now,
+                lambda invoice_id, action, reason, user: self.log(db, invoice_id, action, reason=reason, user=user),
+            )
             db.commit()
             db.refresh(invoice)
             return self.invoice_to_record(invoice).model_dump(mode="json")
@@ -632,39 +600,11 @@ class DesktopWorkflow:
 
     def assert_tally_company_selected(self, client: TallyClient) -> None:
         """Block direct Tally actions unless the selected company is available."""
-        selected_company = (get_tally_settings().tally_company or "").strip()
-        if not selected_company:
-            raise ValueError(
-                "Select a TallyPrime company from Settings > Refresh Companies before posting or syncing to TallyPrime."
-            )
-        logger.info("Tally company verification started for %s", selected_company)
-        available_companies = {str(company).strip() for company in client.fetch_company_names() if str(company).strip()}
-        if selected_company not in available_companies:
-            available_text = ", ".join(sorted(available_companies, key=str.casefold)) or "none returned by TallyPrime"
-            logger.warning(
-                "Tally company verification failed: selected=%s available=%s",
-                selected_company,
-                available_text,
-            )
-            raise ValueError(
-                "Selected TallyPrime company was not found in the running TallyPrime instance. "
-                "Use Settings > Refresh Companies and select the exact company before exporting. "
-                f"Selected: {selected_company}. Available: {available_text}."
-            )
-        logger.info("Tally company verification passed for %s", selected_company)
+        verify_tally_company_selected(client)
 
     def assert_tally_license(self, client: TallyClient) -> None:
         """Verify that the connected TallyPrime serial is licensed for direct export."""
-        logger.info("Tally license verification started")
-        serial = client.fetch_tally_serial_number()
-        active_license_file = license_file_path()
-        logger.info(
-            "Tally license allow-list check started for serial %s using license file: %s",
-            mask_serial(serial),
-            active_license_file,
-        )
-        assert_tally_serial_allowed(serial, active_license_file)
-        logger.info("Tally license verification passed for serial %s", mask_serial(serial))
+        verify_tally_license(client)
 
     def progress(self, callback: ProgressCallback | None, message: str, *, level: str = "info") -> None:
         """Emit one optional user-facing processing progress event."""
@@ -684,22 +624,3 @@ class DesktopWorkflow:
             if not candidate.exists():
                 return candidate
             counter += 1
-
-
-def sha256_file(path: Path) -> str:
-    """Return the SHA-256 hash for a file without loading it all into memory."""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def document_kind_label(kind: DocumentKind) -> str:
-    """Return a user-friendly document classification label."""
-    labels = {
-        DocumentKind.DIGITAL_PDF: "Digital PDF",
-        DocumentKind.SCANNED_PDF: "Scanned PDF",
-        DocumentKind.IMAGE: "Image invoice",
-    }
-    return labels.get(kind, kind.value.replace("_", " ").title())

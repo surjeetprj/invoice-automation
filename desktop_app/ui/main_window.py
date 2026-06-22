@@ -10,7 +10,6 @@ from PySide6.QtCore import QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QFileDialog,
     QComboBox,
-    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -27,7 +26,8 @@ from ..services.workflow import DesktopWorkflow
 from .dashboard_page import DashboardPage
 from .detail_page import DetailPage
 from .invoices_page import InvoicesPage
-from .settings_dialog import SettingsDialog
+from .settings_actions import SettingsActionsMixin
+from .tally_actions import TallyActionsMixin
 from .upload_page import UploadPage
 from .widgets.pdf_preview import render_document_to_images
 from .widgets.worker import Worker, WorkerResult
@@ -35,7 +35,7 @@ from .widgets.worker import Worker, WorkerResult
 logger = logging.getLogger(__name__)
 
 
-class MainWindow(QMainWindow):
+class MainWindow(SettingsActionsMixin, TallyActionsMixin, QMainWindow):
     """Top-level desktop shell with top navigation and page routing."""
 
     def __init__(self) -> None:
@@ -210,96 +210,6 @@ class MainWindow(QMainWindow):
         worker.signals.finished.connect(lambda w=worker: self.active_workers.discard(w))
         self.thread_pool.start(worker)
 
-    def load_settings(self) -> None:
-        """Load runtime settings into top-bar controls without contacting Tally."""
-        def loaded(settings: dict[str, Any]) -> None:
-            self.current_settings = settings.get("tally", {})
-            self.set_company_selector(self.current_settings.get("tally_company", ""))
-
-        self.run_task(self.workflow.get_settings, loaded)
-
-    def set_company_selector(self, company: str) -> None:
-        """Show the active Tally company in the top bar."""
-        self.loading_settings = True
-        try:
-            current_values = [self.company_selector.itemText(index) for index in range(self.company_selector.count())]
-            if company and company not in current_values:
-                self.company_selector.addItem(company)
-            self.company_selector.setCurrentText(company or "")
-        finally:
-            self.loading_settings = False
-
-    def save_selected_company(self, *_args: Any) -> None:
-        """Persist the company selected or typed in the top bar."""
-        if self.loading_settings:
-            return
-        company = self.company_selector.currentText().strip()
-        if company == str(self.current_settings.get("tally_company") or ""):
-            return
-        payload = {"selected_company": company, "tally_company": company}
-
-        def saved(settings: dict[str, Any]) -> None:
-            self.current_settings = settings.get("tally", {})
-            self.set_company_selector(self.current_settings.get("tally_company", ""))
-
-        self.run_task(self.workflow.save_settings, saved, {"tally": payload})
-
-    def open_settings_dialog(self) -> None:
-        """Open Tally settings dialog and persist accepted edits."""
-        dialog = SettingsDialog(self)
-        dialog.load_settings(self.current_settings)
-
-        def refresh_companies() -> None:
-            def loaded(companies: list[str]) -> None:
-                dialog.set_companies(companies)
-                QMessageBox.information(dialog, "TallyPrime", f"Loaded {len(companies)} compan{'y' if len(companies) == 1 else 'ies'}.")
-
-            self.run_task(self.workflow.list_tally_companies, loaded, on_error=lambda err: QMessageBox.warning(dialog, "TallyPrime", err))
-
-        def test_connection() -> None:
-            def tested(result: dict[str, Any]) -> None:
-                serial = result.get("serial_number") or "not available"
-                companies = result.get("companies") or []
-                if companies:
-                    dialog.set_companies([str(company) for company in companies])
-                dialog.set_serial_number(str(serial))
-                QMessageBox.information(dialog, "TallyPrime", f"Connection verified. Serial: {serial}")
-
-            self.run_task(
-                self.workflow.test_tally_settings,
-                tested,
-                {"tally": dialog.settings_payload()},
-                on_error=lambda err: QMessageBox.warning(dialog, "TallyPrime", err),
-            )
-
-        def refresh_masters() -> None:
-            company = dialog.selected_company()
-
-            def loaded(result: dict[str, Any]) -> None:
-                dialog.set_ledgers([str(ledger) for ledger in result.get("ledgers", [])])
-                dialog.set_stock_groups([str(group) for group in result.get("stock_groups", [])])
-                QMessageBox.information(dialog, "TallyPrime", "Loaded ledger and stock group choices.")
-
-            def load_options() -> dict[str, Any]:
-                return {
-                    "ledgers": self.workflow.list_tally_ledgers(company),
-                    "stock_groups": self.workflow.list_tally_stock_groups(company),
-                }
-
-            self.run_task(load_options, loaded, on_error=lambda err: QMessageBox.warning(dialog, "TallyPrime", err))
-
-        dialog.refresh_companies_btn.clicked.connect(refresh_companies)
-        dialog.test_connection_btn.clicked.connect(test_connection)
-        dialog.refresh_masters_btn.clicked.connect(refresh_masters)
-        if dialog.exec() != QDialog.Accepted:
-            return
-
-        def saved(settings: dict[str, Any]) -> None:
-            self.current_settings = settings.get("tally", {})
-            self.set_company_selector(self.current_settings.get("tally_company", ""))
-
-        self.run_task(self.workflow.save_settings, saved, {"tally": dialog.settings_payload()})
-
     def check_health(self) -> None:
         """Refresh the top-bar readiness indicator."""
         def ok(_result: Any) -> None:
@@ -460,94 +370,6 @@ class MainWindow(QMainWindow):
             return output_path
 
         self.run_task(build_and_save, lambda saved: QMessageBox.information(self, "Export Complete", f"Saved export to:\n{saved}"))
-
-    def post_invoice_to_tally(self, invoice_id: int) -> None:
-        """Preflight and post an approved invoice to local TallyPrime."""
-        def preflight_done(result: dict[str, Any]) -> None:
-            missing = result.get("missing_masters") or []
-            create_missing = False
-            if missing:
-                message = "TallyPrime is missing these masters for purchase voucher posting:\n\n"
-                message += "\n".join(f"- {name}" for name in missing)
-                message += "\n\nCreate these masters and post the purchase voucher?"
-                if QMessageBox.question(self, "Post Purchase Voucher to TallyPrime", message) != QMessageBox.StandardButton.Yes:
-                    return
-                create_missing = True
-            elif QMessageBox.question(
-                self,
-                "Post Purchase Voucher to TallyPrime",
-                "Post this approved invoice as a purchase voucher to TallyPrime?",
-            ) != QMessageBox.StandardButton.Yes:
-                return
-
-            def posted(post_result: dict[str, Any]) -> None:
-                QMessageBox.information(self, "TallyPrime", post_result.get("message", "Invoice posted to TallyPrime."))
-                self.open_invoice(invoice_id)
-
-            self.run_task(
-                lambda: self.workflow.post_invoice_to_tally(invoice_id, create_missing_masters=create_missing),
-                posted,
-            )
-
-        self.run_task(lambda: self.workflow.tally_preflight(invoice_id), preflight_done)
-
-    def post_invoice_items_to_tally(self, invoice_id: int) -> None:
-        """Preflight and post reviewed line items to local TallyPrime."""
-        def preflight_done(result: dict[str, Any]) -> None:
-            missing = result.get("missing_masters") or []
-            create_missing = False
-            if missing:
-                message = "TallyPrime is missing these masters for item-wise purchase voucher posting:\n\n"
-                message += "\n".join(f"- {name}" for name in missing)
-                message += "\n\nCreate these masters and post the item-wise purchase voucher?"
-                if QMessageBox.question(self, "Post Item-wise Purchase Voucher to TallyPrime", message) != QMessageBox.StandardButton.Yes:
-                    return
-                create_missing = True
-            elif QMessageBox.question(
-                self,
-                "Post Item-wise Purchase Voucher to TallyPrime",
-                "Post this approved invoice as an item-wise purchase voucher to TallyPrime?",
-            ) != QMessageBox.StandardButton.Yes:
-                return
-
-            def posted(post_result: dict[str, Any]) -> None:
-                QMessageBox.information(self, "TallyPrime", post_result.get("message", "Invoice items posted to TallyPrime."))
-                self.open_invoice(invoice_id)
-
-            self.run_task(
-                lambda: self.workflow.post_invoice_items_to_tally(invoice_id, create_missing_masters=create_missing),
-                posted,
-            )
-
-        self.run_task(lambda: self.workflow.tally_inventory_preflight(invoice_id), preflight_done)
-
-    def sync_vendor_master_to_tally(self, invoice_id: int) -> None:
-        """Update only the vendor ledger master in TallyPrime."""
-        if QMessageBox.question(
-            self,
-            "Sync Vendor Ledger to TallyPrime",
-            "Update this vendor ledger in TallyPrime with extracted vendor details?",
-        ) != QMessageBox.StandardButton.Yes:
-            return
-
-        def synced(result: dict[str, Any]) -> None:
-            QMessageBox.information(self, "TallyPrime", result.get("message", "Vendor master synced to TallyPrime."))
-
-        self.run_task(lambda: self.workflow.sync_vendor_master_to_tally(invoice_id), synced)
-
-    def sync_tally_system_ledgers(self, invoice_id: int) -> None:
-        """Update purchase and GST ledger masters in TallyPrime."""
-        if QMessageBox.question(
-            self,
-            "Sync Purchase and GST Ledgers to TallyPrime",
-            "Update the purchase ledger and GST ledgers in TallyPrime?",
-        ) != QMessageBox.StandardButton.Yes:
-            return
-
-        def synced(result: dict[str, Any]) -> None:
-            QMessageBox.information(self, "TallyPrime", result.get("message", "Purchase and GST ledgers synced to TallyPrime."))
-
-        self.run_task(lambda: self.workflow.sync_tally_system_ledgers(invoice_id), synced)
 
     def reviewer_name(self) -> str:
         """Return reviewer identity used for audit log rows."""

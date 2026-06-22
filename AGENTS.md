@@ -26,8 +26,13 @@ python app.py
 
 Working rules:
 
-- Keep UI code in `desktop_app/ui`.
-- Keep workflow orchestration in `desktop_app/services/workflow.py`.
+- Keep UI code in `desktop_app/ui`. `main_window.py` stays the shell; settings
+  dialog actions live in `desktop_app/ui/settings_actions.py`, and direct
+  TallyPrime button flows live in `desktop_app/ui/tally_actions.py`.
+- Keep workflow orchestration in `desktop_app/services/workflow.py`; upload
+  pipeline utilities live in `desktop_app/services/workflow_pipeline.py`, review
+  persistence helpers live in `desktop_app/services/workflow_review.py`, and
+  Tally company/license guard helpers live in `desktop_app/services/workflow_tally.py`.
 - Keep parsing services in `desktop_app/services/parsing`, document services in
   `desktop_app/services/documents`, and export services in
   `desktop_app/services/exports`.
@@ -41,8 +46,9 @@ Working rules:
   `desktop_app/services/exports`.
 - TallyPrime direct actions are serial-locked through signed local licenses.
   Keep license verification in `desktop_app/services/licensing.py`, Tally serial
-  probing in `desktop_app/services/tally/client.py`, and support signing tools in
-  `desktop_app/tools`. Do not commit private keys or generated license files.
+  XML/parsing helpers in `desktop_app/services/tally/serial.py`, master preflight
+  helpers in `desktop_app/services/tally/preflight.py`, and support signing tools
+  in `desktop_app/tools`. Do not commit private keys or generated license files.
   Serial probing must use only the Tally HTTP/XML Product AboutPage report; do not add company-identity or `.env` serial fallbacks.
 - Keep TallyPrime ledger-only and item-wise purchase posting behavior explicit
   in workflow and UI labels. Ledger-only posting creates accounting purchase

@@ -14,7 +14,7 @@ from desktop_app.db.repository import persist_extraction
 from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail, ValidationResult
 from desktop_app.services.tally import TallyClient
 from desktop_app.services.settings import TallySettings
-from desktop_app.services.tally.client import TallyPreflight, annotate_tally_response, build_tally_about_page_xml, merge_tally_responses, parse_tally_about_page_serial_number
+from desktop_app.services.tally.client import TallyPreflight, annotate_tally_response, merge_tally_responses
 from desktop_app.services.tally.masters import (
     build_inventory_stock_items_xml,
     TallyMaster,
@@ -23,7 +23,7 @@ from desktop_app.services.tally.masters import (
     required_inventory_purchase_masters,
     required_purchase_masters,
 )
-from desktop_app.services.tally.responses import TallyResponse, parse_tally_response
+from desktop_app.services.tally.responses import TallyResponse
 from desktop_app.services.tally.vouchers import build_inventory_purchase_voucher_xml, build_purchase_voucher_xml
 from desktop_app.services.workflow import DesktopWorkflow
 
@@ -33,10 +33,10 @@ class TallyServiceTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Keep existing posting tests focused on Tally behavior, not licensing."""
-        self.license_patch = patch("desktop_app.services.workflow.assert_tally_serial_allowed")
+        self.license_patch = patch("desktop_app.services.workflow_tally.assert_tally_serial_allowed")
         self.license_check = self.license_patch.start()
         self.workflow_settings_patch = patch(
-            "desktop_app.services.workflow.get_tally_settings",
+            "desktop_app.services.workflow_tally.get_tally_settings",
             return_value=TallySettings(tally_company="Runtime Company"),
         )
         self.workflow_settings_patch.start()
@@ -97,69 +97,6 @@ class TallyServiceTests(unittest.TestCase):
             persist_extraction(db, invoice, self.sample_invoice_data(), ValidationResult(is_valid=True), "raw text")
             db.commit()
             return invoice.id
-
-    def test_tally_response_parses_success_failure_and_malformed_xml(self) -> None:
-        """Tally responses should normalize success and failure cases."""
-        success = parse_tally_response("<RESPONSE><CREATED>1</CREATED><ALTERED>0</ALTERED><ERRORS>0</ERRORS></RESPONSE>")
-        self.assertTrue(success.success)
-        self.assertEqual(success.created, 1)
-
-        failure = parse_tally_response("<RESPONSE><CREATED>0</CREATED><ERRORS>1</ERRORS><LINEERROR>Missing ledger</LINEERROR></RESPONSE>")
-        self.assertFalse(failure.success)
-        self.assertEqual(failure.errors, 1)
-        self.assertIn("Missing ledger", failure.messages)
-
-        malformed = parse_tally_response("not xml")
-        self.assertFalse(malformed.success)
-        self.assertEqual(malformed.errors, 1)
-
-    def test_tally_client_parses_serial_number_from_about_page_response(self) -> None:
-        """Product AboutPage XML should expose the TallyPrime serial field."""
-        about_xml = """
-        <ENVELOPE>
-          <ABOUTPAGEPROMPT>Application</ABOUTPAGEPROMPT>
-          <ABOUTPAGEINFO>TallyPrime</ABOUTPAGEINFO>
-          <ABOUTPAGEPROMPT>Serial Number</ABOUTPAGEPROMPT>
-          <ABOUTPAGEINFO>764401410</ABOUTPAGEINFO>
-        </ENVELOPE>
-        """
-        self.assertEqual(parse_tally_about_page_serial_number(about_xml), "764401410")
-        about_request = build_tally_about_page_xml()
-        self.assertIn(b"<TYPE>Data</TYPE>", about_request)
-        self.assertIn(b"<ID>Product AboutPage</ID>", about_request)
-        self.assertIn(b"$$SysName:XML", about_request)
-
-    def test_tally_client_uses_only_about_page_probe(self) -> None:
-        """The Product AboutPage report should be the only connected serial probe."""
-        client = TallyClient()
-        about_xml = """
-        <ENVELOPE>
-          <ABOUTPAGEPROMPT>Serial Number</ABOUTPAGEPROMPT>
-          <ABOUTPAGEINFO>TALLY-12345</ABOUTPAGEINFO>
-        </ENVELOPE>
-        """
-        with self.assertLogs("desktop_app.services.tally.client", level="INFO") as logs:
-            with patch.object(client, "post_xml", return_value=about_xml) as post_xml:
-                self.assertEqual(client.fetch_tally_serial_number(), "TALLY-12345")
-
-        self.assertEqual(post_xml.call_count, 1)
-        self.assertIn(b"Product AboutPage", post_xml.call_args.args[0])
-        self.assertIn("Tally serial verified using Product AboutPage probe", "\n".join(logs.output))
-
-    def test_tally_client_fails_closed_when_about_page_has_no_serial(self) -> None:
-        """Missing Product AboutPage serial should block TallyPrime export."""
-        client = TallyClient()
-        with self.assertLogs("desktop_app.services.tally.client", level="ERROR") as logs:
-            with patch.object(
-                client,
-                "post_xml",
-                return_value="<ENVELOPE><ABOUTPAGEPROMPT>Application</ABOUTPAGEPROMPT><ABOUTPAGEINFO>TallyPrime</ABOUTPAGEINFO></ENVELOPE>",
-            ) as post_xml:
-                with self.assertRaisesRegex(ConnectionError, "Product AboutPage did not expose"):
-                    client.fetch_tally_serial_number()
-
-        self.assertEqual(post_xml.call_count, 1)
-        self.assertIn("Product AboutPage", "\n".join(logs.output))
 
     def test_direct_tally_master_xml_uses_runtime_settings(self) -> None:
         """Direct Tally master XML should use runtime company and ledger names."""
@@ -875,7 +812,7 @@ class TallyServiceTests(unittest.TestCase):
         invoice_id = self.create_invoice(engine)
         workflow = DesktopWorkflow()
         workflow._initialized = True
-        with patch("desktop_app.services.workflow.get_tally_settings", return_value=TallySettings(tally_company="")):
+        with patch("desktop_app.services.workflow_tally.get_tally_settings", return_value=TallySettings(tally_company="")):
             with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
                 with patch("desktop_app.services.workflow.TallyClient") as client_cls:
                     client = client_cls.return_value

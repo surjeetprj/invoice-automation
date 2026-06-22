@@ -36,6 +36,9 @@ invoice remains available for review.
 ## Key Modules
 
 - `services/workflow.py`: UI-facing invoice lifecycle orchestration.
+- `services/workflow_pipeline.py`: upload/reprocess pipeline utility helpers.
+- `services/workflow_review.py`: review decision, correction persistence, and validation refresh helpers.
+- `services/workflow_tally.py`: selected-company and signed-license guards for direct Tally actions.
 - `services/parsing/ai_parser.py`: parser facade for text and visual invoice sources.
 - `services/parsing/ai_client.py`: Gemini structured-output clients using the
   configured model.
@@ -52,9 +55,11 @@ invoice remains available for review.
   ERPNext purchase exports.
 - `services/settings.py`: runtime-editable Tally defaults stored in app-data JSON.
 - `services/tally/`: local TallyPrime HTTP/XML client, controlled master XML,
-  ledger-only and item-wise purchase voucher XML, inventory master XML, and
-  response parsing for direct posting.
-- `ui/`: PySide6 pages and widgets.
+  ledger-only and item-wise purchase voucher XML, inventory master XML, response
+  parsing, Product AboutPage serial helpers, and master preflight helpers for direct posting.
+- `ui/`: PySide6 pages and widgets. `main_window.py` remains the shell;
+  `settings_actions.py` owns Settings dialog orchestration, and `tally_actions.py`
+  owns direct TallyPrime confirmation/posting UI flows.
 
 ## Persistence
 

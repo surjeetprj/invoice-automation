@@ -1,5 +1,6 @@
-"""Direct TallyPrime integration services."""
+from __future__ import annotations
 
-from .client import TallyClient, TallyPostResult, TallyPreflight
+from .client import TallyClient
+from .preflight import TallyPreflight
 
-__all__ = ["TallyClient", "TallyPostResult", "TallyPreflight"]
+__all__ = ["TallyClient", "TallyPreflight"]
