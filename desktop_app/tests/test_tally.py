@@ -214,6 +214,23 @@ class TallyServiceTests(unittest.TestCase):
         self.assertIn("Stock Group Master: Primary", labels)
         self.assertLess(labels.index("Stock Group Master: Primary"), labels.index("Stock Item Master: Consulting Service under Primary"))
 
+    def test_inventory_unit_xml_maps_pcs_to_pieces_uqc(self) -> None:
+        """Default PCS units should emit the GST pieces UQC for TallyPrime."""
+        data = self.sample_invoice_data().model_copy(
+            update={
+                "line_items": [
+                    self.sample_invoice_data().line_items[0].model_copy(update={"unit": "PCS"})
+                ]
+            }
+        )
+        masters = required_inventory_purchase_masters(data)
+        labels = [master.label for master in masters]
+        xml = build_master_import_xml(masters).decode("utf-8")
+        self.assertIn("Unit Master: PCS", labels)
+        self.assertIn('<UNIT NAME="PCS" RESERVEDNAME="" ACTION="Create">', xml)
+        self.assertIn("<GSTREPUOM>PCS-PIECES</GSTREPUOM>", xml)
+        self.assertIn("<REPORTINGUQCNAME>PCS-PIECES</REPORTINGUQCNAME>", xml)
+
     def test_inventory_unit_xml_maps_pairs_to_prs_uqc(self) -> None:
         """Pair-based reviewed units should emit a valid GST reporting UQC."""
         data = self.sample_invoice_data().model_copy(

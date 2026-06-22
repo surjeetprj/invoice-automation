@@ -390,6 +390,23 @@ class DomainHelperTests(unittest.TestCase):
         self.assertEqual(item["unit"], "Year")
         self.assertEqual(item["description"], description)
 
+    def test_ai_normalization_defaults_missing_unit_to_pcs_when_quantity_exists(self) -> None:
+        """Quantity-bearing lines without visible UOM should default to PCS for item-wise posting."""
+        data = normalize_extracted_data({
+            "line_items": [
+                {"description": "Cloud hosting service", "quantity": 1, "rate": 100, "taxable_value": 100},
+                {"description": "Reviewed item", "quantity": 2, "unit": "NOS", "rate": 50, "taxable_value": 100},
+                {"description": "Support 1 Year Plan", "quantity": 1, "rate": 1200, "taxable_value": 1200},
+                {"description": "Zero quantity service", "quantity": 0, "rate": 0, "taxable_value": 0},
+            ],
+        })
+
+        items = data["line_items"]
+        self.assertEqual(items[0]["unit"], "PCS")
+        self.assertEqual(items[1]["unit"], "NOS")
+        self.assertEqual(items[2]["unit"], "Year")
+        self.assertNotIn("unit", items[3])
+
     def test_ai_normalization_keeps_existing_line_identity_fields(self) -> None:
         """Reviewed or explicit identity fields should not be overwritten from description."""
         data = normalize_extracted_data({

@@ -91,6 +91,8 @@ def enrich_line_item_identity(data: dict[str, Any]) -> None:
             unit = extract_unit(description)
             if unit:
                 item["unit"] = unit
+        if not useful_text(item.get("unit")) and to_float(item.get("quantity")) > 0:
+            item["unit"] = "PCS"
         if not useful_text(item.get("item_name")):
             item_name = extract_item_name(description)
             if item_name:
