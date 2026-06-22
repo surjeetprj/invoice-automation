@@ -189,7 +189,7 @@ def tax_ledger_masters(*, action: str = "Alter") -> list[TallyMaster]:
     ]
 
 
-def build_collection_export_xml(collection_name: str, master_type: str) -> bytes:
+def build_collection_export_xml(collection_name: str, master_type: str, company: str | None = None) -> bytes:
     """Build a Tally collection export request used for preflight existence checks."""
     envelope = Element("ENVELOPE")
     header = SubElement(envelope, "HEADER")
@@ -200,7 +200,7 @@ def build_collection_export_xml(collection_name: str, master_type: str) -> bytes
     body = SubElement(envelope, "BODY")
     desc = SubElement(body, "DESC")
     static = SubElement(desc, "STATICVARIABLES")
-    add_text_if_company(static)
+    add_text_if_company(static, company=company)
     add_text(static, "SVEXPORTFORMAT", "$$SysName:XML")
     tdl = SubElement(desc, "TDL")
     tdl_message = SubElement(tdl, "TDLMESSAGE")
@@ -395,11 +395,11 @@ def build_voucher_type(parent: Element, master: TallyMaster) -> Element:
     return voucher_type
 
 
-def add_text_if_company(parent: Element) -> None:
+def add_text_if_company(parent: Element, company: str | None = None) -> None:
     """Add the company static variable when configured."""
-    company = get_tally_settings().tally_company
-    if company:
-        add_text(parent, "SVCURRENTCOMPANY", company)
+    selected_company = company if company is not None else get_tally_settings().tally_company
+    if selected_company:
+        add_text(parent, "SVCURRENTCOMPANY", selected_company)
 
 
 def add_text(parent: Element, tag: str, text: object) -> Element:

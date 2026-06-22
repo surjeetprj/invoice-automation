@@ -36,7 +36,7 @@ from .exports.exporters import export_invoice_csv, export_invoice_json, export_i
 from .licensing import assert_tally_serial_allowed
 from .parsing.ai_client import AIRateLimitError
 from .parsing.ai_parser import extract_invoice_source_text, parse_invoice, parse_invoice_file
-from .settings import build_tally_settings, get_tally_settings, license_file_path, save_tally_settings
+from .settings import build_tally_settings, get_tally_settings, get_tally_settings_payload, license_file_path, save_tally_settings
 from .tally import TallyClient
 from .tally.client import mask_serial
 from ..domain.validation import calculate_confidence_score, validate_invoice
@@ -59,20 +59,34 @@ class DesktopWorkflow:
     def get_settings(self) -> dict[str, Any]:
         """Return runtime-editable desktop settings for the UI."""
         self.initialize()
-        return {"tally": get_tally_settings().model_dump()}
+        return {"tally": get_tally_settings_payload()}
 
     def save_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Persist runtime-editable desktop settings."""
         self.initialize()
         tally_payload = payload.get("tally", payload) if isinstance(payload, dict) else {}
-        settings = save_tally_settings(tally_payload if isinstance(tally_payload, dict) else {})
-        return {"tally": settings.model_dump()}
+        save_tally_settings(tally_payload if isinstance(tally_payload, dict) else {})
+        return {"tally": get_tally_settings_payload()}
 
     def list_tally_companies(self) -> list[str]:
         """Return available company names from the local TallyPrime HTTP endpoint."""
         self.initialize()
         logger.info("Listing TallyPrime companies")
         return sorted(TallyClient().fetch_company_names(), key=str.casefold)
+
+    def list_tally_ledgers(self, company: str | None = None) -> list[str]:
+        """Return ledger names from TallyPrime for the selected company."""
+        self.initialize()
+        selected_company = (company or get_tally_settings().tally_company or "").strip()
+        logger.info("Listing TallyPrime ledgers for company: %s", selected_company or "<default>")
+        return sorted(TallyClient().fetch_master_names("InvoiceAISettingsLedgers", "Ledger", company=selected_company), key=str.casefold)
+
+    def list_tally_stock_groups(self, company: str | None = None) -> list[str]:
+        """Return stock group names from TallyPrime for the selected company."""
+        self.initialize()
+        selected_company = (company or get_tally_settings().tally_company or "").strip()
+        logger.info("Listing TallyPrime stock groups for company: %s", selected_company or "<default>")
+        return sorted(TallyClient().fetch_master_names("InvoiceAISettingsStockGroups", "Stock Group", company=selected_company), key=str.casefold)
 
     def test_tally_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Test TallyPrime reachability and serial detection for unsaved settings."""

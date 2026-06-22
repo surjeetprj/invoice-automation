@@ -548,6 +548,21 @@ class TallyServiceTests(unittest.TestCase):
         self.assertEqual(failure.messages, ("Unit Master: PRS -> DUPLICATE ORIGINAL NAME",))
         self.assertEqual(success.messages, ())
 
+    def test_workflow_lists_tally_ledgers_and_stock_groups_for_company(self) -> None:
+        """Settings lookups should fetch Tally masters for the requested company."""
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.TallyClient") as client_cls:
+            client = client_cls.return_value
+            client.fetch_master_names.side_effect = [{"Purchase", "Input CGST"}, {"Primary", "Licenses"}]
+            ledgers = workflow.list_tally_ledgers("SRC Pvt Ltd")
+            stock_groups = workflow.list_tally_stock_groups("SRC Pvt Ltd")
+
+        self.assertEqual(ledgers, ["Input CGST", "Purchase"])
+        self.assertEqual(stock_groups, ["Licenses", "Primary"])
+        client.fetch_master_names.assert_any_call("InvoiceAISettingsLedgers", "Ledger", company="SRC Pvt Ltd")
+        client.fetch_master_names.assert_any_call("InvoiceAISettingsStockGroups", "Stock Group", company="SRC Pvt Ltd")
+
     def test_workflow_posts_approved_invoice_and_marks_posted(self) -> None:
         """Successful Tally posting should mark the invoice Posted and audit it."""
         engine = self.make_engine()

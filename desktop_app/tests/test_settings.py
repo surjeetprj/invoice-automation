@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from desktop_app.services import settings
-from desktop_app.services.settings import get_tally_settings, save_tally_settings
+from desktop_app.services.settings import get_tally_settings, get_tally_settings_payload, save_tally_settings
 
 
 class RuntimeSettingsTests(unittest.TestCase):
@@ -25,8 +25,8 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(loaded.purchase_ledger_name, settings.config.PURCHASE_LEDGER_NAME)
         self.assertEqual(loaded.default_stock_group, settings.config.DEFAULT_STOCK_GROUP)
 
-    def test_saved_runtime_settings_override_defaults(self) -> None:
-        """Saved Tally settings should round-trip through runtime JSON."""
+    def test_saved_runtime_settings_split_global_and_company_mapping(self) -> None:
+        """Saved Tally settings should keep global values separate from company mappings."""
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "settings.json"
             with patch("desktop_app.services.settings.SETTINGS_FILE", path):
@@ -39,14 +39,72 @@ class RuntimeSettingsTests(unittest.TestCase):
                     }
                 )
                 loaded = get_tally_settings()
+                payload = get_tally_settings_payload()
                 persisted = json.loads(path.read_text(encoding="utf-8"))
 
         self.assertEqual(saved.tally_company, "Runtime Company")
         self.assertEqual(loaded.tally_url, "http://localhost:9100")
         self.assertEqual(loaded.purchase_ledger_name, "Runtime Purchase")
         self.assertEqual(loaded.default_stock_group, "Runtime Stock Group")
-        self.assertTrue(persisted["tally"])
-        self.assertNotIn("tally_serial_number", persisted["tally"])
+        self.assertEqual(persisted["tally"]["global"]["selected_company"], "Runtime Company")
+        self.assertEqual(persisted["tally"]["global"]["tally_url"], "http://localhost:9100")
+        self.assertEqual(persisted["tally"]["companies"]["Runtime Company"]["purchase_ledger_name"], "Runtime Purchase")
+        self.assertNotIn("tally_serial_number", persisted["tally"]["global"])
+        self.assertIn("company_mappings", payload)
+        self.assertEqual(payload["default_company_mapping"]["purchase_ledger_name"], settings.config.PURCHASE_LEDGER_NAME)
+        self.assertEqual(payload["default_company_mapping"]["default_stock_group"], settings.config.DEFAULT_STOCK_GROUP)
+
+    def test_company_mappings_are_independent(self) -> None:
+        """Each selected company should keep its own ledger mapping."""
+        with TemporaryDirectory() as temp_dir:
+            with patch("desktop_app.services.settings.SETTINGS_FILE", Path(temp_dir) / "settings.json"):
+                save_tally_settings(
+                    {
+                        "tally_company": "SRC Pvt Ltd",
+                        "purchase_ledger_name": "SRC Purchase",
+                        "default_stock_group": "SRC Stock",
+                    }
+                )
+                save_tally_settings(
+                    {
+                        "tally_company": "Surjeet Pvt Ltd",
+                        "purchase_ledger_name": "Surjeet Purchase",
+                        "default_stock_group": "Surjeet Stock",
+                    }
+                )
+                surjeet = get_tally_settings()
+                src = save_tally_settings({"selected_company": "SRC Pvt Ltd"})
+
+        self.assertEqual(surjeet.tally_company, "Surjeet Pvt Ltd")
+        self.assertEqual(surjeet.purchase_ledger_name, "Surjeet Purchase")
+        self.assertEqual(src.tally_company, "SRC Pvt Ltd")
+        self.assertEqual(src.purchase_ledger_name, "SRC Purchase")
+        self.assertEqual(src.default_stock_group, "SRC Stock")
+
+    def test_legacy_flat_runtime_settings_still_load(self) -> None:
+        """Existing flat settings.json files should keep working after the refactor."""
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "settings.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "tally": {
+                            "tally_url": "http://localhost:9100",
+                            "tally_company": "Legacy Company",
+                            "purchase_ledger_name": "Legacy Purchase",
+                            "default_stock_group": "Legacy Stock",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch("desktop_app.services.settings.SETTINGS_FILE", path):
+                loaded = get_tally_settings()
+
+        self.assertEqual(loaded.tally_company, "Legacy Company")
+        self.assertEqual(loaded.tally_url, "http://localhost:9100")
+        self.assertEqual(loaded.purchase_ledger_name, "Legacy Purchase")
+        self.assertEqual(loaded.default_stock_group, "Legacy Stock")
 
     def test_partial_runtime_settings_preserve_defaults(self) -> None:
         """Partial settings payloads should not erase unspecified defaults."""

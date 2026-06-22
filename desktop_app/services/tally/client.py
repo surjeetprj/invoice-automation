@@ -123,9 +123,9 @@ class TallyClient:
         raw = self.post_xml(build_tally_companies_xml())
         return parse_master_names(raw)
 
-    def fetch_master_names(self, collection_name: str, master_type: str) -> set[str]:
+    def fetch_master_names(self, collection_name: str, master_type: str, company: str | None = None) -> set[str]:
         """Fetch master names for a Tally collection type."""
-        xml = build_collection_export_xml(collection_name, master_type)
+        xml = build_collection_export_xml(collection_name, master_type, company=company)
         raw = self.post_xml(xml)
         return parse_master_names(raw)
 
