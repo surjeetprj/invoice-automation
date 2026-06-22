@@ -116,12 +116,7 @@ reviewed item data is incomplete.
 Direct TallyPrime posting and Tally master sync also require a signed InvoiceAI
 license file whose allowed TallyPrime serial list matches the connected local
 TallyPrime installation. Configure `INVOICEAI_LICENSE_FILE` when the license
-file is not stored at the default app-data path. InvoiceAI first probes
-TallyPrime over HTTP/XML using the LicenseInfo TDL report probe, then the
-company collection identity probe. If a customer installation still cannot
-expose the serial, support may set the hidden `TALLY_SERIAL_NUMBER` fallback in
-`desktop_app\.env`; it must match the signed license and is not editable from
-the app Settings dialog.
+file is not stored at the default app-data path. InvoiceAI verifies the TallyPrime serial only through the Product AboutPage HTTP/XML report. If Product AboutPage does not expose the serial, direct TallyPrime sync/post is blocked.
 
 ## License Key Generation
 

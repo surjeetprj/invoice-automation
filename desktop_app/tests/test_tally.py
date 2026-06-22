@@ -14,7 +14,7 @@ from desktop_app.db.repository import persist_extraction
 from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail, ValidationResult
 from desktop_app.services.tally import TallyClient
 from desktop_app.services.settings import TallySettings
-from desktop_app.services.tally.client import TallyPreflight, annotate_tally_response, build_tally_identity_xml, build_tally_license_info_xml, merge_tally_responses, parse_tally_serial_number
+from desktop_app.services.tally.client import TallyPreflight, annotate_tally_response, build_tally_about_page_xml, merge_tally_responses, parse_tally_about_page_serial_number
 from desktop_app.services.tally.masters import (
     build_inventory_stock_items_xml,
     TallyMaster,
@@ -113,84 +113,53 @@ class TallyServiceTests(unittest.TestCase):
         self.assertFalse(malformed.success)
         self.assertEqual(malformed.errors, 1)
 
-    def test_tally_client_parses_serial_number_from_identity_response(self) -> None:
-        """Tally identity XML responses should expose license serial fields."""
-        xml = """
-        <ENVELOPE><BODY><DATA><COLLECTION>
-          <COMPANY><NAME>Demo</NAME><LICENSESERIALNUMBER>TALLY-12345</LICENSESERIALNUMBER></COMPANY>
-        </COLLECTION></DATA></BODY></ENVELOPE>
+    def test_tally_client_parses_serial_number_from_about_page_response(self) -> None:
+        """Product AboutPage XML should expose the TallyPrime serial field."""
+        about_xml = """
+        <ENVELOPE>
+          <ABOUTPAGEPROMPT>Application</ABOUTPAGEPROMPT>
+          <ABOUTPAGEINFO>TallyPrime</ABOUTPAGEINFO>
+          <ABOUTPAGEPROMPT>Serial Number</ABOUTPAGEPROMPT>
+          <ABOUTPAGEINFO>764401410</ABOUTPAGEINFO>
+        </ENVELOPE>
         """
-        self.assertEqual(parse_tally_serial_number(xml), "TALLY-12345")
-        self.assertEqual(parse_tally_serial_number("<GETSERIALFIELD>Serial Number TALLY-24680</GETSERIALFIELD>"), "TALLY-24680")
-        self.assertEqual(parse_tally_serial_number("<COMPANY><LICENSESERIALNUMBER>Serial Number TALLY-67890</LICENSESERIALNUMBER></COMPANY>"), "TALLY-67890")
-        self.assertIn(b"InvoiceAITallyIdentity", build_tally_identity_xml())
-        license_xml = build_tally_license_info_xml("Runtime Company")
-        self.assertIn(b"SVCURRENTCOMPANY", license_xml)
-        self.assertIn(b"Runtime Company", license_xml)
-        self.assertIn(b"$$LicenseInfo:SerialNumber", license_xml)
-        self.assertIn(b"<TYPE>DATA</TYPE>", license_xml)
-        self.assertIn(b"InvoiceAILicenseInfoReport", license_xml)
+        self.assertEqual(parse_tally_about_page_serial_number(about_xml), "764401410")
+        about_request = build_tally_about_page_xml()
+        self.assertIn(b"<TYPE>Data</TYPE>", about_request)
+        self.assertIn(b"<ID>Product AboutPage</ID>", about_request)
+        self.assertIn(b"$$SysName:XML", about_request)
 
-    def test_tally_client_uses_license_info_probe_first(self) -> None:
-        """The TDL LicenseInfo report probe should be preferred for connected serial verification."""
-        client = TallyClient(serial_number="")
+    def test_tally_client_uses_only_about_page_probe(self) -> None:
+        """The Product AboutPage report should be the only connected serial probe."""
+        client = TallyClient()
+        about_xml = """
+        <ENVELOPE>
+          <ABOUTPAGEPROMPT>Serial Number</ABOUTPAGEPROMPT>
+          <ABOUTPAGEINFO>TALLY-12345</ABOUTPAGEINFO>
+        </ENVELOPE>
+        """
         with self.assertLogs("desktop_app.services.tally.client", level="INFO") as logs:
-            with patch.object(client, "post_xml", return_value="<GETSERIALFIELD>TALLY-12345</GETSERIALFIELD>") as post_xml:
+            with patch.object(client, "post_xml", return_value=about_xml) as post_xml:
                 self.assertEqual(client.fetch_tally_serial_number(), "TALLY-12345")
 
         self.assertEqual(post_xml.call_count, 1)
-        self.assertIn(b"$$LicenseInfo:SerialNumber", post_xml.call_args.args[0])
-        self.assertIn("Tally serial verified using LicenseInfo TDL report probe", "\n".join(logs.output))
+        self.assertIn(b"Product AboutPage", post_xml.call_args.args[0])
+        self.assertIn("Tally serial verified using Product AboutPage probe", "\n".join(logs.output))
 
-    def test_tally_client_falls_back_to_identity_probe(self) -> None:
-        """Company collection identity probe should be used when LicenseInfo returns no serial."""
-        client = TallyClient(serial_number="")
-        with self.assertLogs("desktop_app.services.tally.client", level="INFO") as logs:
+    def test_tally_client_fails_closed_when_about_page_has_no_serial(self) -> None:
+        """Missing Product AboutPage serial should block TallyPrime export."""
+        client = TallyClient()
+        with self.assertLogs("desktop_app.services.tally.client", level="ERROR") as logs:
             with patch.object(
                 client,
                 "post_xml",
-                side_effect=[
-                    "<ENVELOPE><BODY><DATA /></BODY></ENVELOPE>",
-                    "<ENVELOPE><COMPANY><LICENSESERIALNUMBER>TALLY-67890</LICENSESERIALNUMBER></COMPANY></ENVELOPE>",
-                ],
+                return_value="<ENVELOPE><ABOUTPAGEPROMPT>Application</ABOUTPAGEPROMPT><ABOUTPAGEINFO>TallyPrime</ABOUTPAGEINFO></ENVELOPE>",
             ) as post_xml:
-                self.assertEqual(client.fetch_tally_serial_number(), "TALLY-67890")
+                with self.assertRaisesRegex(ConnectionError, "Product AboutPage did not expose"):
+                    client.fetch_tally_serial_number()
 
-        self.assertEqual(post_xml.call_count, 2)
-        self.assertIn(b"$$LicenseInfo:SerialNumber", post_xml.call_args_list[0].args[0])
-        self.assertIn(b"InvoiceAITallyIdentity", post_xml.call_args_list[1].args[0])
-        self.assertIn("Tally serial verified using Company collection identity probe", "\n".join(logs.output))
-
-    def test_tally_client_uses_configured_serial_when_tally_does_not_expose_one(self) -> None:
-        """Hidden .env serial fallback should remain available after both HTTP probes fail."""
-        client = TallyClient(serial_number="TALLY-12345")
-        with self.assertLogs("desktop_app.services.tally.client", level="WARNING") as logs:
-            with patch.object(
-                client,
-                "post_xml",
-                side_effect=[
-                    "<ENVELOPE><COMPANY><NAME>Demo</NAME></COMPANY></ENVELOPE>",
-                    "<ENVELOPE><COMPANY><NAME>Demo</NAME></COMPANY></ENVELOPE>",
-                ],
-            ) as post_xml:
-                self.assertEqual(client.fetch_tally_serial_number(), "TALLY-12345")
-
-        self.assertEqual(post_xml.call_count, 2)
-        self.assertIn("support-only .env fallback", "\n".join(logs.output))
-
-    def test_tally_client_fails_closed_when_serial_missing(self) -> None:
-        """Missing serial fields should block TallyPrime export when no fallback is configured."""
-        client = TallyClient(serial_number="")
-        with patch.object(
-            client,
-            "post_xml",
-            side_effect=[
-                "<ENVELOPE><COMPANY><NAME>Demo</NAME></COMPANY></ENVELOPE>",
-                "<ENVELOPE><COMPANY><NAME>Demo</NAME></COMPANY></ENVELOPE>",
-            ],
-        ):
-            with self.assertRaisesRegex(ConnectionError, "Could not verify TallyPrime serial number"):
-                client.fetch_tally_serial_number()
+        self.assertEqual(post_xml.call_count, 1)
+        self.assertIn("Product AboutPage", "\n".join(logs.output))
 
     def test_direct_tally_master_xml_uses_runtime_settings(self) -> None:
         """Direct Tally master XML should use runtime company and ledger names."""

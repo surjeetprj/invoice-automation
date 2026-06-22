@@ -43,8 +43,7 @@ Working rules:
   Keep license verification in `desktop_app/services/licensing.py`, Tally serial
   probing in `desktop_app/services/tally/client.py`, and support signing tools in
   `desktop_app/tools`. Do not commit private keys or generated license files.
-  Serial probing should try Tally HTTP/XML first and use `TALLY_SERIAL_NUMBER`
-  only as a support-only fallback checked against the signed license.
+  Serial probing must use only the Tally HTTP/XML Product AboutPage report; do not add company-identity or `.env` serial fallbacks.
 - Keep TallyPrime ledger-only and item-wise purchase posting behavior explicit
   in workflow and UI labels. Ledger-only posting creates accounting purchase
   vouchers; item-wise posting creates inventory purchase vouchers with stock

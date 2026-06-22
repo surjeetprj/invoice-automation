@@ -135,14 +135,7 @@ this license gate.
 
 The license file defaults to the app runtime directory as
 `invoiceai_license.json`, or `INVOICEAI_LICENSE_FILE` may point to a custom path.
-InvoiceAI probes TallyPrime over HTTP/XML in this order:
-
-1. LicenseInfo TDL report probe using `$$LicenseInfo:SerialNumber`.
-2. Company collection identity probe.
-3. Hidden support-only `.env` fallback `TALLY_SERIAL_NUMBER`.
-
-The fallback remains signed-license checked and is not editable from the app
-Settings dialog.
+InvoiceAI verifies the connected TallyPrime serial only by exporting the Product AboutPage report and reading its `Serial Number` field. If Product AboutPage does not expose a serial, direct TallyPrime sync/post is blocked before any master or voucher request.
 
 License files are signed with Ed25519. The app embeds only the public key. The
 private signing key and generated customer license files must remain outside git.
