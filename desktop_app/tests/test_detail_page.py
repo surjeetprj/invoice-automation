@@ -319,19 +319,66 @@ class DetailPageLayoutTests(unittest.TestCase):
                 window.deleteLater()
 
     def test_settings_dialog_round_trips_default_stock_group(self) -> None:
-        """Settings dialog should include the default stock group field."""
+        """Settings dialog should include editable dropdowns and read-only serial display."""
         dialog = SettingsDialog()
         try:
-            dialog.load_settings({"default_stock_group": "Software Services"})
-            self.assertEqual(dialog.default_stock_group.text(), "Software Services")
+            dialog.load_settings(
+                {
+                    "tally_company": "Demo Company",
+                    "company_mappings": {
+                        "Demo Company": {
+                            "default_stock_group": "Software Services",
+                            "purchase_ledger_name": "Purchase A",
+                        }
+                    },
+                }
+            )
+            self.assertEqual(dialog.default_stock_group.currentText(), "Software Services")
+            self.assertTrue(dialog.serial_number.isReadOnly())
 
-            dialog.default_stock_group.setText("Licenses")
+            dialog.set_ledgers(["Purchase A", "Input CGST"])
+            dialog.set_stock_groups(["Software Services", "Licenses"])
+            dialog.default_stock_group.setCurrentText("Licenses")
             self.assertEqual(dialog.settings_payload()["default_stock_group"], "Licenses")
+            self.assertEqual(dialog.settings_payload()["selected_company"], "Demo Company")
             self.assertNotIn("tally_serial_number", dialog.settings_payload())
-            self.assertFalse(hasattr(dialog, "serial_number"))
         finally:
             dialog.deleteLater()
 
+    def test_settings_dialog_uses_default_mapping_after_master_refresh(self) -> None:
+        """Unsaved company mappings should keep env defaults when Tally masters refresh."""
+        dialog = SettingsDialog()
+        try:
+            dialog.load_settings(
+                {
+                    "selected_company": "New Company",
+                    "default_company_mapping": {
+                        "tally_vendor_parent_ledger": "Sundry Creditors",
+                        "default_stock_group": "Primary",
+                        "purchase_ledger_name": "Purchase Account",
+                        "input_cgst_ledger_name": "Input CGST",
+                        "input_sgst_ledger_name": "Input SGST",
+                        "input_igst_ledger_name": "Input IGST",
+                        "input_cess_ledger_name": "Input CESS",
+                    },
+                    "company_mappings": {},
+                }
+            )
+
+            self.assertEqual(dialog.vendor_parent.currentText(), "Sundry Creditors")
+            self.assertEqual(dialog.default_stock_group.currentText(), "Primary")
+            self.assertEqual(dialog.purchase_ledger.currentText(), "Purchase Account")
+
+            dialog.set_ledgers(["Custom Purchase", "Input CGST"])
+            dialog.set_stock_groups(["Software Services"])
+            self.assertEqual(dialog.vendor_parent.currentText(), "Sundry Creditors")
+            self.assertEqual(dialog.default_stock_group.currentText(), "Primary")
+            self.assertEqual(dialog.purchase_ledger.currentText(), "Purchase Account")
+
+            dialog.purchase_ledger.setCurrentText("Custom Purchase")
+            self.assertEqual(dialog.settings_payload()["purchase_ledger_name"], "Custom Purchase")
+        finally:
+            dialog.deleteLater()
 
     def test_upload_page_status_replaces_processing_steps(self) -> None:
         """Upload status should show only one latest processing message."""

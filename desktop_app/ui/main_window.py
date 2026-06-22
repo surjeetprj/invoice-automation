@@ -236,8 +236,7 @@ class MainWindow(QMainWindow):
         company = self.company_selector.currentText().strip()
         if company == str(self.current_settings.get("tally_company") or ""):
             return
-        payload = dict(self.current_settings)
-        payload["tally_company"] = company
+        payload = {"selected_company": company, "tally_company": company}
 
         def saved(settings: dict[str, Any]) -> None:
             self.current_settings = settings.get("tally", {})
@@ -263,6 +262,7 @@ class MainWindow(QMainWindow):
                 companies = result.get("companies") or []
                 if companies:
                     dialog.set_companies([str(company) for company in companies])
+                dialog.set_serial_number(str(serial))
                 QMessageBox.information(dialog, "TallyPrime", f"Connection verified. Serial: {serial}")
 
             self.run_task(
@@ -272,8 +272,25 @@ class MainWindow(QMainWindow):
                 on_error=lambda err: QMessageBox.warning(dialog, "TallyPrime", err),
             )
 
+        def refresh_masters() -> None:
+            company = dialog.selected_company()
+
+            def loaded(result: dict[str, Any]) -> None:
+                dialog.set_ledgers([str(ledger) for ledger in result.get("ledgers", [])])
+                dialog.set_stock_groups([str(group) for group in result.get("stock_groups", [])])
+                QMessageBox.information(dialog, "TallyPrime", "Loaded ledger and stock group choices.")
+
+            def load_options() -> dict[str, Any]:
+                return {
+                    "ledgers": self.workflow.list_tally_ledgers(company),
+                    "stock_groups": self.workflow.list_tally_stock_groups(company),
+                }
+
+            self.run_task(load_options, loaded, on_error=lambda err: QMessageBox.warning(dialog, "TallyPrime", err))
+
         dialog.refresh_companies_btn.clicked.connect(refresh_companies)
         dialog.test_connection_btn.clicked.connect(test_connection)
+        dialog.refresh_masters_btn.clicked.connect(refresh_masters)
         if dialog.exec() != QDialog.Accepted:
             return
 
