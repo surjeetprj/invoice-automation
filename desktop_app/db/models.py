@@ -17,6 +17,31 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class TallyMasterMapping(Base):
+    """Confirmed mapping from invoice/config source values to local Tally masters."""
+
+    __tablename__ = "tally_master_mapping"
+    __table_args__ = (
+        Index(
+            "ix_tally_master_mapping_lookup",
+            "biz_id",
+            "company_name",
+            "mapping_type",
+            "source_value",
+            "is_active",
+        ),
+    )
+
+    mapping_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    biz_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    company_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    mapping_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_value: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tally_value: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[str] = mapped_column(String(1), default="Y")
+    created_dtm: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Invoice(Base):
     """Persisted invoice file, workflow, and review summary."""
 

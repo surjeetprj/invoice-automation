@@ -37,10 +37,12 @@ Working rules:
   `desktop_app/services/documents`, and export services in
   `desktop_app/services/exports`.
 - Keep runtime-editable Tally settings in `desktop_app/services/settings.py`;
-  saved app-data `settings.json` stores global Tally connection settings plus
-  per-company ledger mapping values, including `Vender A/C Group` and `Stock Group`.
-  Refreshing Tally ledger/group dropdown choices must preserve current values and
-  use `.env`/config defaults when no company-specific mapping exists.
+  saved app-data `settings.json` stores only global Tally connection settings.
+  Confirmed Tally master mappings live in SQLite `tally_master_mapping`
+  rows. Settings-page defaults use `source_value = "DEFAULT"`; invoice review
+  shows only dynamic mappings such as vendor ledger, stock item, and unit.
+  Refreshing Tally dropdown choices must preserve current values and use
+  `.env`/config defaults when no SQL mapping exists.
 - Keep direct TallyPrime HTTP/XML posting services in
   `desktop_app/services/tally`; file-based downloadable exports remain in
   `desktop_app/services/exports`.

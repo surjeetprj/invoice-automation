@@ -111,7 +111,6 @@ class MetadataForm(QWidget):
         self.tally_mappings = tally_mappings
         self.line_items_section: CollapsibleSection | None = None
         self.tally_mappings_section: CollapsibleSection | None = None
-        
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()

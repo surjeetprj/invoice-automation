@@ -55,6 +55,7 @@ INDEX_DDL = (
     "CREATE INDEX IF NOT EXISTS ix_invoice_line_taxes_line_item_id ON invoice_line_taxes(line_item_id)",
     "CREATE INDEX IF NOT EXISTS ix_invoice_tax_breakups_extraction_id ON invoice_tax_breakups(extraction_id)",
     "CREATE INDEX IF NOT EXISTS ix_invoice_validation_issues_invoice_id ON invoice_validation_issues(invoice_id)",
+    "CREATE INDEX IF NOT EXISTS ix_tally_master_mapping_lookup ON tally_master_mapping(biz_id, company_name, mapping_type, source_value, is_active)",
 )
 
 

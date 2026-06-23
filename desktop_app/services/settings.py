@@ -50,23 +50,23 @@ class TallySettings:
 
 
 def get_tally_settings() -> TallySettings:
-    """Load effective Tally settings for the selected company."""
+    """Load global Tally settings plus config-backed mapping defaults."""
     return settings_from_document(normalized_settings_document(load_settings_file()))
 
 
 def get_tally_settings_payload() -> dict[str, Any]:
-    """Return effective settings plus runtime mappings for the Settings dialog."""
+    """Return global settings plus config defaults for the Settings dialog."""
     document = normalized_settings_document(load_settings_file())
     payload = settings_from_document(document).model_dump()
     payload["selected_company"] = document["global"].get("selected_company", "")
     payload["global_settings"] = dict(document["global"])
     payload["default_company_mapping"] = default_company_mapping()
-    payload["company_mappings"] = {name: dict(mapping) for name, mapping in document["companies"].items()}
+    payload["company_mappings"] = {}
     return payload
 
 
 def save_tally_settings(payload: dict[str, Any]) -> TallySettings:
-    """Persist global Tally settings and selected-company ledger mapping."""
+    """Persist global Tally settings only; master mappings are stored in SQL."""
     document = normalized_settings_document(load_settings_file())
     normalized_payload = payload if isinstance(payload, dict) else {}
 
@@ -78,16 +78,8 @@ def save_tally_settings(payload: dict[str, Any]) -> TallySettings:
         global_settings["selected_company"] = normalized_payload["tally_company"]
     global_settings = build_global_settings(global_settings)
 
-    companies = {name: dict(mapping) for name, mapping in document["companies"].items()}
-    selected_company = global_settings.get("selected_company", "")
-    mapping_payload = {key: normalized_payload[key] for key in COMPANY_MAPPING_KEYS if key in normalized_payload}
-    if selected_company and mapping_payload:
-        current_mapping = companies.get(selected_company, {})
-        merged_mapping = {**current_mapping, **mapping_payload}
-        companies[selected_company] = build_company_mapping(merged_mapping)
-
     content = load_settings_file()
-    content["tally"] = {"global": global_settings, "companies": companies}
+    content["tally"] = {"global": global_settings}
     SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_FILE.write_text(json.dumps(content, indent=2, sort_keys=True), encoding="utf-8")
     return settings_from_document(content["tally"])
@@ -151,7 +143,7 @@ def build_company_mapping(payload: dict[str, Any]) -> dict[str, str]:
 
 
 def default_company_mapping() -> dict[str, str]:
-    """Return default per-company ledger and stock group mapping."""
+    """Return config-backed mapping defaults."""
     return {
         "tally_vendor_parent_ledger": config.TALLY_VENDOR_PARENT_LEDGER,
         "default_stock_group": config.DEFAULT_STOCK_GROUP,
@@ -164,17 +156,16 @@ def default_company_mapping() -> dict[str, str]:
 
 
 def settings_from_document(document: dict[str, Any]) -> TallySettings:
-    """Build the public TallySettings facade from normalized runtime settings."""
+    """Build the public TallySettings facade from normalized global settings."""
     normalized = normalized_settings_document({"tally": document})
     global_settings = normalized["global"]
     selected_company = global_settings.get("selected_company", "")
-    mapping = build_company_mapping(normalized["companies"].get(selected_company, {}))
     return TallySettings(
         tally_url=global_settings["tally_url"],
         tally_company=selected_company,
         invoiceai_license_file=global_settings["invoiceai_license_file"],
         tally_timeout_seconds=global_settings["tally_timeout_seconds"],
-        **mapping,
+        **default_company_mapping(),
     )
 
 
@@ -186,9 +177,7 @@ def build_tally_settings(payload: dict[str, Any]) -> TallySettings:
     if "tally_company" in normalized_payload and "selected_company" not in normalized_payload:
         global_settings["selected_company"] = str(normalized_payload.get("tally_company") or "").strip()
     selected_company = global_settings.get("selected_company", "")
-    existing_mapping = document["companies"].get(selected_company, {})
-    mapping_payload = {key: normalized_payload[key] for key in COMPANY_MAPPING_KEYS if key in normalized_payload}
-    mapping = build_company_mapping({**existing_mapping, **mapping_payload})
+    mapping = build_company_mapping({key: normalized_payload[key] for key in COMPANY_MAPPING_KEYS if key in normalized_payload})
     return TallySettings(
         tally_url=global_settings["tally_url"],
         tally_company=selected_company,

@@ -35,7 +35,7 @@ class DetailPageLayoutTests(unittest.TestCase):
             expected_fields = {field for fields in FIELD_GROUPS.values() for field in fields}
             self.assertEqual(expected_fields, set(page.metadata.fields))
             self.assertIs(page.metadata.line_items, page.line_items)
-            self.assertEqual([page.tabs.tabText(index) for index in range(page.tabs.count())], ["Metadata", "Validation", "Audit Logs"])
+            self.assertEqual([page.tabs.tabText(index) for index in range(page.tabs.count())], ["Metadata", "Validation", "Audit Logs", "Raw Markdown"])
             self.assertEqual(page.splitter.widget(1).minimumWidth(), 360)
             labels = [action.text() for action in page.export_btn.menu().actions()]
             self.assertIn("\u2715 CSV", labels)

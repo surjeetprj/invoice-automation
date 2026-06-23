@@ -97,12 +97,15 @@ Direct TallyPrime posting requires TallyPrime to be running locally with the
 target company open and HTTP enabled, usually at `http://localhost:9000`.
 The top bar includes a Company selector and Settings button for customer-editable
 Tally defaults, including the Stock Group for item-wise posting.
-Tally URL, timeout, and license file are saved globally in `InvoiceAI\settings.json`.
-Ledger mapping values, including `Vender A/C Group` and `Stock Group`, are saved per selected company. The Settings
-dialog can refresh Tally ledgers and stock groups into editable dropdowns, so
-users can select existing masters or type names that should be created later.
-Refreshing ledger/group choices does not clear mapping fields: existing saved values
-are preserved, and companies without saved mappings fall back to `.env`/config defaults.
+Tally URL, timeout, selected company, and license file are saved globally in
+`InvoiceAI\settings.json`. Confirmed ledger/group mappings are stored in SQLite
+in `tally_master_mapping`, keyed by selected company and mapping type.
+Settings-page values such as `Vender A/C Group`, `Stock Group`, Purchase Ledger,
+and input GST ledgers are saved as SQL `DEFAULT` mappings. The Settings dialog
+can refresh Tally ledgers and stock groups into editable dropdowns, so users can
+select existing masters or type names that should be created later. Refreshing
+ledger/group choices does not clear mapping fields: existing SQL values are
+preserved, and companies without saved mappings fall back to `.env`/config defaults.
 Before any direct Tally sync/post, InvoiceAI verifies that the selected company
 is returned by the running TallyPrime instance. If the company is blank, typed
 wrongly, or not open/loaded in TallyPrime, export is blocked before masters or

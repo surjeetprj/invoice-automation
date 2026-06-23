@@ -36,6 +36,19 @@ from .parsing.ai_client import AIRateLimitError
 from .parsing.ai_parser import extract_invoice_source_text, parse_invoice, parse_invoice_file
 from .settings import build_tally_settings, get_tally_settings, get_tally_settings_payload, save_tally_settings
 from .tally import TallyClient
+from .tally.mapping import (
+    STOCK_ITEM,
+    UNIT,
+    VENDOR_LEDGER,
+    all_company_mappings,
+    context_rows_for_invoice,
+    context_rows_for_settings,
+    dynamic_mapping_rows,
+    migrate_legacy_settings_mappings,
+    save_settings_mapping,
+    settings_mapping_from_db,
+    tally_mapping_context,
+)
 from .workflow_pipeline import document_kind_label, sha256_file
 from .workflow_review import apply_review_decision, ensure_review_allowed
 from .workflow_tally import assert_tally_company_selected as verify_tally_company_selected
@@ -55,20 +68,37 @@ class DesktopWorkflow:
             return
         logger.info("Initializing desktop database")
         init_db()
+        with session_scope() as db:
+            migrated = migrate_legacy_settings_mappings(db)
+            if migrated:
+                logger.info("Migrated %s legacy Tally settings mappings into SQL", migrated)
+                db.commit()
         self._initialized = True
 
     def get_settings(self) -> dict[str, Any]:
         """Return runtime-editable desktop settings for the UI."""
         self.initialize()
-        return {"tally": get_tally_settings_payload()}
+        payload = get_tally_settings_payload()
+        with session_scope() as db:
+            selected_company = str(payload.get("selected_company") or payload.get("tally_company") or "").strip()
+            payload.update(settings_mapping_from_db(db, selected_company))
+            payload["company_mappings"] = all_company_mappings(db)
+        return {"tally": payload}
 
     def save_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Persist runtime-editable desktop settings."""
         self.initialize()
         tally_payload = payload.get("tally", payload) if isinstance(payload, dict) else {}
-        save_tally_settings(tally_payload if isinstance(tally_payload, dict) else {})
-        return {"tally": get_tally_settings_payload()}
-
+        tally_payload = tally_payload if isinstance(tally_payload, dict) else {}
+        save_tally_settings(tally_payload)
+        company_name = str(tally_payload.get("selected_company") or tally_payload.get("tally_company") or "").strip()
+        with session_scope() as db:
+            if company_name:
+                saved = save_settings_mapping(db, company_name, tally_payload)
+                if saved:
+                    logger.info("Saved %s Tally mapping setting(s) for company %s", saved, company_name)
+                db.commit()
+        return self.get_settings()
     def list_tally_companies(self) -> list[str]:
         """Return available company names from the local TallyPrime HTTP endpoint."""
         self.initialize()
@@ -155,7 +185,7 @@ class DesktopWorkflow:
         logger.info("Loading invoice #%s", invoice_id)
         with session_scope() as db:
             invoice = self.require_invoice(db, invoice_id)
-            return self.invoice_to_record(invoice).model_dump(mode="json")
+            return self.invoice_to_record(invoice, db=db, include_tally_mappings=True).model_dump(mode="json")
 
     def get_document_path(self, invoice_id: int) -> Path:
         """Return the local source document path for an invoice."""
@@ -214,7 +244,7 @@ class DesktopWorkflow:
                 self.progress(progress_callback, f"Processing failed: {exc}", level="error")
                 self.log(db, invoice.id, f"Pipeline error: {exc}")
             db.refresh(invoice)
-            return self.invoice_to_record(invoice).model_dump(mode="json")
+            return self.invoice_to_record(invoice, db=db, include_tally_mappings=True).model_dump(mode="json")
 
     def reprocess_invoice(self, invoice_id: int) -> dict[str, Any]:
         """Run the extraction pipeline again for an existing invoice."""
@@ -228,7 +258,7 @@ class DesktopWorkflow:
             self.log(db, invoice.id, "Reprocessing triggered", user="human")
             self.run_pipeline(db, invoice, path)
             db.refresh(invoice)
-            return self.invoice_to_record(invoice).model_dump(mode="json")
+            return self.invoice_to_record(invoice, db=db, include_tally_mappings=True).model_dump(mode="json")
 
     def submit_review(self, invoice_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         """Apply a reviewer decision and return the updated invoice."""
@@ -248,7 +278,7 @@ class DesktopWorkflow:
             )
             db.commit()
             db.refresh(invoice)
-            return self.invoice_to_record(invoice).model_dump(mode="json")
+            return self.invoice_to_record(invoice, db=db, include_tally_mappings=True).model_dump(mode="json")
 
     def audit_log(self, invoice_id: int) -> list[dict[str, Any]]:
         """Return audit timeline rows for an invoice."""
@@ -317,7 +347,8 @@ class DesktopWorkflow:
             self.assert_tally_company_selected(client)
             self.assert_tally_license(client)
             client.check_connection()
-            preflight = client.preflight_purchase_invoice(data)
+            with tally_mapping_context(self.tally_mapping_rows_for_posting(db, data)):
+                preflight = client.preflight_purchase_invoice(data)
             return {
                 "missing_masters": preflight.missing_labels(),
                 "has_missing": preflight.has_missing,
@@ -337,7 +368,8 @@ class DesktopWorkflow:
             client = TallyClient()
             self.assert_tally_company_selected(client)
             self.assert_tally_license(client)
-            preflight = client.preflight_inventory_purchase_invoice(data)
+            with tally_mapping_context(self.tally_mapping_rows_for_posting(db, data)):
+                preflight = client.preflight_inventory_purchase_invoice(data)
             return {
                 "missing_masters": preflight.missing_labels(),
                 "has_missing": preflight.has_missing,
@@ -363,7 +395,9 @@ class DesktopWorkflow:
             self.assert_tally_company_selected(client)
             self.assert_tally_license(client)
             client.check_connection()
-            preflight = client.preflight_purchase_invoice(data)
+            rows = self.tally_mapping_rows_for_posting(db, data)
+            with tally_mapping_context(rows):
+                preflight = client.preflight_purchase_invoice(data)
             if preflight.has_missing:
                 if not create_missing_masters:
                     return {
@@ -371,17 +405,21 @@ class DesktopWorkflow:
                         "requires_confirmation": True,
                         "missing_masters": preflight.missing_labels(),
                     }
-                master_response = client.create_missing_masters(preflight.missing_masters)
+                with tally_mapping_context(rows):
+                    master_response = client.create_missing_masters(preflight.missing_masters)
                 if not master_response.success:
                     raise ValueError(f"Tally master creation failed: {master_response.summary}")
                 self.log(db, invoice.id, f"TallyPrime masters created: {master_response.summary}")
-            vendor_response = client.sync_vendor_master(data)
+            with tally_mapping_context(rows):
+                vendor_response = client.sync_vendor_master(data)
             if vendor_response.success:
                 self.log(db, invoice.id, f"TallyPrime vendor master synced: {vendor_response.summary}")
-            ledgers_response = client.sync_system_ledgers()
+            with tally_mapping_context(rows):
+                ledgers_response = client.sync_system_ledgers()
             if ledgers_response.success:
                 self.log(db, invoice.id, f"TallyPrime purchase/GST ledgers synced: {ledgers_response.summary}")
-            voucher_response = client.post_purchase_voucher(invoice.id, data)
+            with tally_mapping_context(rows):
+                voucher_response = client.post_purchase_voucher(invoice.id, data)
             if not voucher_response.success:
                 raise ValueError(f"TallyPrime voucher posting failed: {voucher_response.summary}")
             invoice.status = InvoiceStatus.POSTED
@@ -408,7 +446,9 @@ class DesktopWorkflow:
             client = TallyClient()
             self.assert_tally_company_selected(client)
             self.assert_tally_license(client)
-            preflight = client.preflight_inventory_purchase_invoice(data)
+            rows = self.tally_mapping_rows_for_posting(db, data)
+            with tally_mapping_context(rows):
+                preflight = client.preflight_inventory_purchase_invoice(data)
             if preflight.has_missing:
                 if not create_missing_masters:
                     return {
@@ -416,20 +456,25 @@ class DesktopWorkflow:
                         "requires_confirmation": True,
                         "missing_masters": preflight.missing_labels(),
                     }
-                master_response = client.create_missing_inventory_masters(preflight.missing_masters)
+                with tally_mapping_context(rows):
+                    master_response = client.create_missing_inventory_masters(preflight.missing_masters)
                 if not master_response.success:
                     raise ValueError(f"Tally inventory master creation failed: {master_response.summary}")
                 self.log(db, invoice.id, f"TallyPrime inventory masters created: {master_response.summary}")
-            vendor_response = client.sync_vendor_master(data)
+            with tally_mapping_context(rows):
+                vendor_response = client.sync_vendor_master(data)
             if vendor_response.success:
                 self.log(db, invoice.id, f"TallyPrime vendor master synced: {vendor_response.summary}")
-            ledgers_response = client.sync_system_ledgers()
+            with tally_mapping_context(rows):
+                ledgers_response = client.sync_system_ledgers()
             if ledgers_response.success:
                 self.log(db, invoice.id, f"TallyPrime purchase/GST ledgers synced: {ledgers_response.summary}")
-            stock_items_response = client.sync_inventory_item_masters(data)
+            with tally_mapping_context(rows):
+                stock_items_response = client.sync_inventory_item_masters(data)
             if stock_items_response.success:
                 self.log(db, invoice.id, f"TallyPrime stock item masters synced: {stock_items_response.summary}")
-            voucher_response = client.post_inventory_purchase_voucher(invoice.id, data)
+            with tally_mapping_context(rows):
+                voucher_response = client.post_inventory_purchase_voucher(invoice.id, data)
             if not voucher_response.success:
                 raise ValueError(f"TallyPrime item voucher posting failed: {voucher_response.summary}")
             invoice.status = InvoiceStatus.POSTED
@@ -450,7 +495,8 @@ class DesktopWorkflow:
             self.assert_tally_company_selected(client)
             self.assert_tally_license(client)
             client.check_connection()
-            response = client.sync_vendor_master(data)
+            with tally_mapping_context(self.tally_mapping_rows_for_posting(db, data)):
+                response = client.sync_vendor_master(data)
             if not response.success:
                 raise ValueError(f"TallyPrime vendor master sync failed: {response.summary}")
             self.log(db, invoice.id, f"TallyPrime vendor master synced: {response.summary}")
@@ -461,19 +507,21 @@ class DesktopWorkflow:
         self.initialize()
         logger.info("Tally system ledger sync requested")
         with session_scope() as db:
+            data = None
             if invoice_id is not None:
-                self.require_invoice(db, invoice_id)
+                invoice = self.require_invoice(db, invoice_id)
+                data = invoice_data_from_invoice(invoice)
             client = TallyClient()
             self.assert_tally_company_selected(client)
             self.assert_tally_license(client)
             client.check_connection()
-            response = client.sync_system_ledgers()
+            with tally_mapping_context(self.tally_mapping_rows_for_posting(db, data)):
+                response = client.sync_system_ledgers()
             if not response.success:
                 raise ValueError(f"TallyPrime ledger sync failed: {response.summary}")
             if invoice_id is not None:
                 self.log(db, invoice_id, f"TallyPrime purchase/GST ledgers synced: {response.summary}")
             return {"success": True, "message": "Purchase and GST ledgers synced to TallyPrime.", "tally_response": response.summary}
-
     def run_pipeline(self, db, invoice: Invoice, file_path: Path, progress_callback: ProgressCallback | None = None) -> None:
         """Execute extraction, AI parsing, validation, and persistence."""
         start = time.perf_counter()
@@ -562,10 +610,13 @@ class DesktopWorkflow:
         self.log(db, invoice.id, f"Pipeline complete in {invoice.processing_time_ms}ms - status set to Pending_Review")
         self.progress(progress_callback, "Invoice is ready for review.")
 
-    def invoice_to_record(self, invoice: Invoice) -> InvoiceRecord:
+    def invoice_to_record(self, invoice: Invoice, *, db=None, include_tally_mappings: bool = False) -> InvoiceRecord:
         """Convert an ORM invoice into a display-ready Pydantic record."""
         extracted = invoice_data_from_invoice(invoice)
         validation = validation_from_invoice(invoice) if extracted else None
+        tally_mappings = []
+        if include_tally_mappings and db is not None and extracted is not None:
+            tally_mappings = self.tally_mapping_rows_for_review(db, extracted)
         return InvoiceRecord(
             id=invoice.id,
             filename=invoice.filename,
@@ -583,8 +634,38 @@ class DesktopWorkflow:
             rejection_reason=invoice.rejection_reason,
             created_at=invoice.created_at,
             updated_at=invoice.updated_at,
+            tally_mappings=tally_mappings,
         )
 
+    def tally_mapping_rows_for_posting(self, db, data: InvoiceData | None = None) -> list[dict[str, Any]]:
+        """Return SQL mapping rows for direct Tally XML generation."""
+        company = get_tally_settings().tally_company.strip()
+        if data is None:
+            return context_rows_for_settings(db, company)
+        return context_rows_for_invoice(db, data, company)
+    def tally_mapping_rows_for_review(self, db, data: InvoiceData) -> list[dict[str, Any]]:
+        """Return editable invoice-level mapping rows with best-effort Tally suggestions."""
+        settings = get_tally_settings()
+        company = settings.tally_company.strip()
+        candidates: dict[str, list[str]] = {VENDOR_LEDGER: [], STOCK_ITEM: [], UNIT: []}
+        if company:
+            try:
+                client = TallyClient(url=settings.tally_url, timeout=min(settings.tally_timeout_seconds, 5))
+                candidates[VENDOR_LEDGER] = sorted(
+                    client.fetch_master_names("InvoiceAIReviewVendorLedgers", "Ledger", company=company),
+                    key=str.casefold,
+                )
+                candidates[STOCK_ITEM] = sorted(
+                    client.fetch_master_names("InvoiceAIReviewStockItems", "Stock Item", company=company),
+                    key=str.casefold,
+                )
+                candidates[UNIT] = sorted(
+                    client.fetch_master_names("InvoiceAIReviewUnits", "Unit", company=company),
+                    key=str.casefold,
+                )
+            except Exception as exc:
+                logger.info("Tally mapping suggestions unavailable: %s", exc)
+        return dynamic_mapping_rows(db, data, company, candidates=candidates)
     def require_invoice(self, db, invoice_id: int) -> Invoice:
         """Fetch an invoice or raise a user-facing error."""
         invoice = db.get(Invoice, invoice_id)

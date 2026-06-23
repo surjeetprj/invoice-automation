@@ -10,6 +10,8 @@ from ..db.models import Invoice
 from ..db.repository import invoice_data_from_invoice, persist_extraction, raw_markdown_from_invoice
 from ..domain.schemas import InvoiceData, InvoiceReviewRequest, ReviewDecision
 from ..domain.validation import validate_invoice
+from .settings import get_tally_settings
+from .tally.mapping import save_mappings
 
 AuditWriter = Callable[[int, str, str | None, str], None]
 
@@ -56,15 +58,23 @@ def apply_review_decision(db, invoice: Invoice, review: InvoiceReviewRequest, no
 
 
 def persist_review_corrections(db, invoice: Invoice, review: InvoiceReviewRequest, audit: AuditWriter) -> list[str]:
-    """Persist reviewer corrections and refresh validation rows."""
+    """Persist reviewer corrections, mapping edits, and refreshed validation rows."""
+    corrections = dict(review.corrections or {})
+    mapping_rows = corrections.pop("tally_mappings", [])
     current_data = invoice_data_from_invoice(invoice) or InvoiceData()
     current = current_data.model_dump(mode="json")
     changed: list[str] = []
-    for field, value in (review.corrections or {}).items():
+    for field, value in corrections.items():
         if current.get(field) != value:
             audit(invoice.id, f"HITL: Field '{field}' corrected", "Manual correction during review", review.reviewer)
             current[field] = value
             changed.append(field)
+    if mapping_rows:
+        company_name = get_tally_settings().tally_company
+        saved = save_mappings(db, company_name, mapping_rows)
+        if saved:
+            audit(invoice.id, f"HITL: Tally mappings saved - {saved} row(s)", "Manual mapping during review", review.reviewer)
+            changed.append("tally_mappings")
     data = InvoiceData(**current)
     raw_markdown = raw_markdown_from_invoice(invoice)
     validation = validate_invoice(data, raw_markdown)

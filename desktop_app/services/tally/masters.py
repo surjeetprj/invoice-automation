@@ -10,6 +10,20 @@ from xml.etree.ElementTree import Element, SubElement, indent, tostring
 
 from ...config import STATE_CODES
 from ..settings import get_tally_settings
+from .mapping import (
+    INPUT_CESS_LEDGER as MAP_INPUT_CESS_LEDGER,
+    INPUT_CGST_LEDGER as MAP_INPUT_CGST_LEDGER,
+    INPUT_IGST_LEDGER as MAP_INPUT_IGST_LEDGER,
+    INPUT_SGST_LEDGER as MAP_INPUT_SGST_LEDGER,
+    PURCHASE_LEDGER as MAP_PURCHASE_LEDGER,
+    STOCK_GROUP as MAP_STOCK_GROUP,
+    STOCK_ITEM as MAP_STOCK_ITEM,
+    UNIT as MAP_UNIT,
+    VENDOR_GROUP as MAP_VENDOR_GROUP,
+    VENDOR_LEDGER as MAP_VENDOR_LEDGER,
+    mapped_default,
+    mapped_value,
+)
 from ...domain.schemas import InvoiceData, LineItem
 from ...domain.parsing import parse_date
 
@@ -61,7 +75,7 @@ def required_purchase_masters(data: InvoiceData) -> list[TallyMaster]:
     """Return masters needed for ledger-only purchase posting."""
     masters = [
         vendor_master_from_invoice(data, action="Create"),
-        TallyMaster(get_tally_settings().purchase_ledger_name, PURCHASE_LEDGER, "Purchase Accounts"),
+        TallyMaster(mapped_default(MAP_PURCHASE_LEDGER, get_tally_settings().purchase_ledger_name), PURCHASE_LEDGER, "Purchase Accounts"),
         *tax_ledger_masters(action="Create"),
         TallyMaster(PURCHASE_VOUCHER_TYPE, VOUCHER_TYPE, PURCHASE_VOUCHER_TYPE),
     ]
@@ -88,11 +102,12 @@ def required_inventory_purchase_masters(data: InvoiceData) -> list[TallyMaster]:
 
 def vendor_master_from_invoice(data: InvoiceData, *, action: str = "Alter") -> TallyMaster:
     """Build a vendor ledger master from extracted invoice data."""
-    vendor_name = data.vendor_name or "Unknown Supplier"
+    vendor_source = data.vendor_name or "Unknown Supplier"
+    vendor_name = mapped_value(MAP_VENDOR_LEDGER, vendor_source, vendor_source)
     return TallyMaster(
         vendor_name,
         VENDOR_LEDGER,
-        get_tally_settings().tally_vendor_parent_ledger,
+        mapped_default(MAP_VENDOR_GROUP, get_tally_settings().tally_vendor_parent_ledger),
         data.vendor_gstin,
         address=data.vendor_address,
         state=vendor_state(data),
@@ -109,7 +124,7 @@ def unit_master_from_line_item(unit: str | None, *, action: str = "Create") -> T
     normalized = normalize_unit_name(unit)
     if not normalized:
         return None
-    return TallyMaster(normalized, UNIT_MASTER, action=action)
+    return TallyMaster(mapped_value(MAP_UNIT, normalized, normalized), UNIT_MASTER, action=action)
 
 
 def stock_item_master_from_invoice_item(item: LineItem, data: InvoiceData, *, action: str = "Create") -> TallyMaster:
@@ -132,7 +147,7 @@ def stock_item_master_from_invoice_item(item: LineItem, data: InvoiceData, *, ac
 
 def default_stock_group_name() -> str:
     """Return the runtime-configured default stock group for item-wise posting."""
-    return get_tally_settings().default_stock_group or "Primary"
+    return mapped_default(MAP_STOCK_GROUP, get_tally_settings().default_stock_group or "Primary")
 
 def stock_group_master(name: str | None = None, *, parent: str | None = None, action: str = "Create") -> TallyMaster:
     """Build a stock group master used by item-wise posting."""
@@ -167,7 +182,7 @@ def build_vendor_master_xml(data: InvoiceData, *, action: str = "Alter") -> byte
 def build_system_ledgers_xml(*, action: str = "Alter") -> bytes:
     """Build XML that creates or enriches purchase and GST tax ledgers."""
     masters = [
-        TallyMaster(get_tally_settings().purchase_ledger_name, PURCHASE_LEDGER, "Purchase Accounts", action=action),
+        TallyMaster(mapped_default(MAP_PURCHASE_LEDGER, get_tally_settings().purchase_ledger_name), PURCHASE_LEDGER, "Purchase Accounts", action=action),
         *tax_ledger_masters(action=action),
     ]
     return build_master_import_xml(masters)
@@ -182,10 +197,10 @@ def build_inventory_stock_items_xml(data: InvoiceData, *, action: str = "Alter")
 def tax_ledger_masters(*, action: str = "Alter") -> list[TallyMaster]:
     """Return configured GST input tax ledger masters."""
     return [
-        TallyMaster(get_tally_settings().input_cgst_ledger_name, TAX_LEDGER, "Duties & Taxes", tax_type="CGST", action=action),
-        TallyMaster(get_tally_settings().input_sgst_ledger_name, TAX_LEDGER, "Duties & Taxes", tax_type="SGST", action=action),
-        TallyMaster(get_tally_settings().input_igst_ledger_name, TAX_LEDGER, "Duties & Taxes", tax_type="IGST", action=action),
-        TallyMaster(get_tally_settings().input_cess_ledger_name, TAX_LEDGER, "Duties & Taxes", tax_type="Cess", action=action),
+        TallyMaster(mapped_default(MAP_INPUT_CGST_LEDGER, get_tally_settings().input_cgst_ledger_name), TAX_LEDGER, "Duties & Taxes", tax_type="CGST", action=action),
+        TallyMaster(mapped_default(MAP_INPUT_SGST_LEDGER, get_tally_settings().input_sgst_ledger_name), TAX_LEDGER, "Duties & Taxes", tax_type="SGST", action=action),
+        TallyMaster(mapped_default(MAP_INPUT_IGST_LEDGER, get_tally_settings().input_igst_ledger_name), TAX_LEDGER, "Duties & Taxes", tax_type="IGST", action=action),
+        TallyMaster(mapped_default(MAP_INPUT_CESS_LEDGER, get_tally_settings().input_cess_ledger_name), TAX_LEDGER, "Duties & Taxes", tax_type="Cess", action=action),
     ]
 
 
@@ -613,4 +628,5 @@ def normalize_stock_item_name(description: str | None) -> str:
 
 def stock_item_name_from_line_item(item: LineItem) -> str:
     """Return the reviewed Tally stock item name, preferring clean item_name."""
-    return normalize_stock_item_name(item.item_name or item.description)
+    source = normalize_stock_item_name(item.item_name or item.description)
+    return mapped_value(MAP_STOCK_ITEM, source, source)

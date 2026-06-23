@@ -219,6 +219,18 @@ class ValidationResult(BaseModel):
         return data
 
 
+
+class TallyMappingRecord(BaseModel):
+    """Editable mapping from an invoice/config source value to a Tally master."""
+
+    mapping_type: str
+    source_value: str
+    tally_value: str | None = None
+    is_active: str = "Y"
+    candidates: list[str] = Field(default_factory=list)
+    match_score: float | None = None
+    auto_matched: bool = False
+
 class InvoiceReviewRequest(BaseModel):
     """Payload submitted by the reviewer from the desktop UI."""
 
@@ -247,6 +259,7 @@ class InvoiceRecord(BaseModel):
     rejection_reason: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    tally_mappings: list[TallyMappingRecord] = Field(default_factory=list)
 
 
 class DashboardStats(BaseModel):

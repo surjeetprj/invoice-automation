@@ -80,11 +80,16 @@ payload with supplier, item rows, and GST tax rows.
 Downloadable exports stay in `services/exports`. Direct posting to a locally
 running TallyPrime instance is handled by `services/tally` and orchestrated by
 `DesktopWorkflow`. Customer-editable Tally settings are stored in runtime
-`settings.json` as global connection settings plus per-company ledger mappings such as `Vender A/C Group` and `Stock Group`.
-The Settings dialog can query TallyPrime for company, ledger, and stock group
-choices without requiring users to type existing master names manually. Master
-refreshes populate dropdown choices only; they preserve the current mapping values
-and use `.env`/config defaults when a company has no saved mapping yet.
+`settings.json` as global connection settings only. Confirmed Tally master mappings
+are stored in the normalized SQLite `tally_master_mapping` table. Settings-page
+values such as `Vender A/C Group`, `Stock Group`, Purchase Ledger, and input
+GST ledgers are stored as SQL `DEFAULT` mappings for the selected company.
+Invoice review shows dynamic mappings not already covered by Settings, such as
+vendor ledger, stock item, and unit. The Settings dialog can query TallyPrime
+for company, ledger, and stock group choices without requiring users to type
+existing master names manually. Master refreshes populate dropdown choices only;
+they preserve the current mapping values and use `.env`/config defaults when a
+company has no saved SQL mapping yet.
 
 Direct TallyPrime posting has two explicit modes:
 

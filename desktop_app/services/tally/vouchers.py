@@ -6,6 +6,18 @@ from datetime import datetime
 from xml.etree.ElementTree import Element, SubElement, indent, tostring
 
 from ..settings import get_tally_settings
+from .mapping import (
+    INPUT_CESS_LEDGER as MAP_INPUT_CESS_LEDGER,
+    INPUT_CGST_LEDGER as MAP_INPUT_CGST_LEDGER,
+    INPUT_IGST_LEDGER as MAP_INPUT_IGST_LEDGER,
+    INPUT_SGST_LEDGER as MAP_INPUT_SGST_LEDGER,
+    PURCHASE_LEDGER as MAP_PURCHASE_LEDGER,
+    ROUND_OFF_LEDGER as MAP_ROUND_OFF_LEDGER,
+    UNIT as MAP_UNIT,
+    VENDOR_LEDGER as MAP_VENDOR_LEDGER,
+    mapped_default,
+    mapped_value,
+)
 from ...domain.parsing import parse_date
 from ...domain.schemas import InvoiceData, SupplyType
 from ..exports.exporters import invoice_tax_totals, tax_components_for_item
@@ -33,7 +45,7 @@ def build_purchase_voucher_xml(invoice_id: int, data: InvoiceData) -> bytes:
     add_text(voucher, "PERSISTEDVIEW", ACCOUNTING_VOUCHER_VIEW)
     add_text(voucher, "ISINVOICE", "No")
     add_ledger_entry(voucher, vendor_display_name(data), -abs(data.total_amount), deemed_positive=True)
-    purchase_entry = add_ledger_entry(voucher, get_tally_settings().purchase_ledger_name, data.total_taxable_amount, deemed_positive=False)
+    purchase_entry = add_ledger_entry(voucher, mapped_default(MAP_PURCHASE_LEDGER, get_tally_settings().purchase_ledger_name), data.total_taxable_amount, deemed_positive=False)
     if can_post_detailed_gst(data):
         add_purchase_gst_details(purchase_entry, data, tally_date(data.date))
     for name, amount in tally_tax_ledgers(data):
@@ -41,7 +53,7 @@ def build_purchase_voucher_xml(invoice_id: int, data: InvoiceData) -> bytes:
             tax_entry = add_ledger_entry(voucher, name, amount, deemed_positive=False)
             add_tax_ledger_gst_details(tax_entry, name, data)
     if data.round_off:
-        add_ledger_entry(voucher, "Round Off", data.round_off, deemed_positive=data.round_off < 0)
+        add_ledger_entry(voucher, mapped_default(MAP_ROUND_OFF_LEDGER, "Round Off"), data.round_off, deemed_positive=data.round_off < 0)
     indent(envelope, space="  ")
     return tostring(envelope, encoding="utf-8", xml_declaration=True)
 
@@ -103,7 +115,7 @@ def build_inventory_purchase_voucher_xml(invoice_id: int, data: InvoiceData) -> 
         add_text(batch, "ACTUALQTY", quantity_text(item.quantity, unit_name))
         add_text(batch, "BILLEDQTY", quantity_text(item.quantity, unit_name))
         allocation = SubElement(inventory_entry, "ACCOUNTINGALLOCATIONS.LIST")
-        add_text(allocation, "LEDGERNAME", get_tally_settings().purchase_ledger_name)
+        add_text(allocation, "LEDGERNAME", mapped_default(MAP_PURCHASE_LEDGER, get_tally_settings().purchase_ledger_name))
         add_text(allocation, "ISDEEMEDPOSITIVE", "Yes")
         add_text(allocation, "AMOUNT", f"-{abs(item.taxable_value):.2f}")
         for duty_head, rate in item_gst_rate_details(item, data):
@@ -122,7 +134,7 @@ def build_inventory_purchase_voucher_xml(invoice_id: int, data: InvoiceData) -> 
             tax_entry = add_item_tax_ledger_entry(voucher, name, amount)
             add_tax_ledger_gst_details(tax_entry, name, data, item_mode=True)
     if data.round_off:
-        add_item_tax_ledger_entry(voucher, "Round Off", abs(data.round_off), deemed_positive=data.round_off >= 0)
+        add_item_tax_ledger_entry(voucher, mapped_default(MAP_ROUND_OFF_LEDGER, "Round Off"), abs(data.round_off), deemed_positive=data.round_off >= 0)
     indent(envelope, space="  ")
     return tostring(envelope, encoding="utf-8", xml_declaration=True)
 
@@ -203,10 +215,10 @@ def tally_tax_ledgers(data: InvoiceData) -> tuple[tuple[str, float], ...]:
     settings = get_tally_settings()
     totals = invoice_tax_totals(data)
     return (
-        (settings.input_cgst_ledger_name, totals["CGST"]),
-        (settings.input_sgst_ledger_name, totals["SGST"]),
-        (settings.input_igst_ledger_name, totals["IGST"]),
-        (settings.input_cess_ledger_name, totals["CESS"]),
+        (mapped_default(MAP_INPUT_CGST_LEDGER, settings.input_cgst_ledger_name), totals["CGST"]),
+        (mapped_default(MAP_INPUT_SGST_LEDGER, settings.input_sgst_ledger_name), totals["SGST"]),
+        (mapped_default(MAP_INPUT_IGST_LEDGER, settings.input_igst_ledger_name), totals["IGST"]),
+        (mapped_default(MAP_INPUT_CESS_LEDGER, settings.input_cess_ledger_name), totals["CESS"]),
     )
 def invoice_reference(data: InvoiceData, invoice_id: int) -> str:
     """Return the invoice reference used across Tally voucher fields."""
@@ -215,7 +227,8 @@ def invoice_reference(data: InvoiceData, invoice_id: int) -> str:
 
 def vendor_display_name(data: InvoiceData) -> str:
     """Return the party ledger name used across Tally voucher fields."""
-    return data.vendor_name or "Unknown Supplier"
+    source = data.vendor_name or "Unknown Supplier"
+    return mapped_value(MAP_VENDOR_LEDGER, source, source)
 
 
 def add_purchase_gst_details(entry: Element, data: InvoiceData, voucher_date: str) -> None:
@@ -375,7 +388,10 @@ def rate_text(rate: float, unit_name: str) -> str:
 def tally_unit_text(unit: str | None) -> str:
     """Return a Tally-friendly display unit for inventory rows."""
     normalized = normalize_unit_name(unit) or ""
-    return normalized.title() if normalized else ""
+    if not normalized:
+        return ""
+    mapped = mapped_value(MAP_UNIT, normalized, normalized)
+    return mapped.title() if mapped else ""
 
 
 def item_supply_type(item) -> str:
