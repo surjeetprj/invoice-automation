@@ -52,7 +52,6 @@ from .tally.mapping import (
 from .workflow_pipeline import document_kind_label, sha256_file
 from .workflow_review import apply_review_decision, ensure_review_allowed
 from .workflow_tally import assert_tally_company_selected as verify_tally_company_selected
-from .workflow_tally import assert_tally_license as verify_tally_license
 from ..domain.validation import calculate_confidence_score, validate_invoice
 
 logger = logging.getLogger(__name__)
@@ -345,7 +344,6 @@ class DesktopWorkflow:
                 raise ValueError("No extracted invoice data is available for Tally posting.")
             client = TallyClient()
             self.assert_tally_company_selected(client)
-            self.assert_tally_license(client)
             client.check_connection()
             with tally_mapping_context(self.tally_mapping_rows_for_posting(db, data)):
                 preflight = client.preflight_purchase_invoice(data)
@@ -367,7 +365,6 @@ class DesktopWorkflow:
                 raise ValueError("No extracted invoice data is available for Tally item posting.")
             client = TallyClient()
             self.assert_tally_company_selected(client)
-            self.assert_tally_license(client)
             with tally_mapping_context(self.tally_mapping_rows_for_posting(db, data)):
                 preflight = client.preflight_inventory_purchase_invoice(data)
             return {
@@ -393,7 +390,6 @@ class DesktopWorkflow:
                 raise ValueError("No extracted invoice data is available for Tally posting.")
             client = TallyClient()
             self.assert_tally_company_selected(client)
-            self.assert_tally_license(client)
             client.check_connection()
             rows = self.tally_mapping_rows_for_posting(db, data)
             with tally_mapping_context(rows):
@@ -445,7 +441,6 @@ class DesktopWorkflow:
                 raise ValueError("No extracted invoice data is available for Tally item posting.")
             client = TallyClient()
             self.assert_tally_company_selected(client)
-            self.assert_tally_license(client)
             rows = self.tally_mapping_rows_for_posting(db, data)
             with tally_mapping_context(rows):
                 preflight = client.preflight_inventory_purchase_invoice(data)
@@ -493,7 +488,6 @@ class DesktopWorkflow:
                 raise ValueError("No extracted invoice data is available for Tally vendor sync.")
             client = TallyClient()
             self.assert_tally_company_selected(client)
-            self.assert_tally_license(client)
             client.check_connection()
             with tally_mapping_context(self.tally_mapping_rows_for_posting(db, data)):
                 response = client.sync_vendor_master(data)
@@ -513,7 +507,6 @@ class DesktopWorkflow:
                 data = invoice_data_from_invoice(invoice)
             client = TallyClient()
             self.assert_tally_company_selected(client)
-            self.assert_tally_license(client)
             client.check_connection()
             with tally_mapping_context(self.tally_mapping_rows_for_posting(db, data)):
                 response = client.sync_system_ledgers()
@@ -682,11 +675,6 @@ class DesktopWorkflow:
     def assert_tally_company_selected(self, client: TallyClient) -> None:
         """Block direct Tally actions unless the selected company is available."""
         verify_tally_company_selected(client)
-
-    def assert_tally_license(self, client: TallyClient) -> None:
-        """Verify that the connected TallyPrime serial is licensed for direct export."""
-        verify_tally_license(client)
-
     def progress(self, callback: ProgressCallback | None, message: str, *, level: str = "info") -> None:
         """Emit one optional user-facing processing progress event."""
         if callback:

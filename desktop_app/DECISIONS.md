@@ -44,16 +44,13 @@
   ledger-only posting.
 - A successful direct TallyPrime post changes invoice status to `Posted`; a
   failed post leaves the existing invoice status unchanged.
-- Direct TallyPrime sync/post actions require a signed local InvoiceAI license
-  whose allowed serial list matches the connected TallyPrime serial. This gate must not block upload, review,
-  approval, downloadable exports, or ERPNext export.
-- TallyPrime serial verification must use only the Product AboutPage HTTP/XML report. If the serial is missing from that report, direct TallyPrime actions fail closed.
+- Direct TallyPrime sync/post actions are not gated by an InvoiceAI license. The Settings `Test Connection` action may read the TallyPrime serial from the Product AboutPage HTTP/XML report for display and support visibility only.
 - Direct TallyPrime sync/post actions must block when the selected company is
   blank or not returned by TallyPrime, so a wrong setting cannot accidentally
   create masters or vouchers in another company.
 - Vendor, purchase, and GST ledger masters may be synced to TallyPrime, but
   the app relies on the configured ledger names as the stable mapping contract.
-- Customer-editable Tally connection values live in runtime `settings.json`; Tally URL, timeout, selected company, and license file are global. Confirmed ledger/group/item/unit mappings live in SQLite `tally_master_mapping` rows keyed by company, mapping type, and source value.
+- Customer-editable Tally connection values live in runtime `settings.json`; Tally URL, timeout, and selected company are global. Confirmed ledger/group/item/unit mappings live in SQLite `tally_master_mapping` rows keyed by company, mapping type, and source value.
 - Settings should prefer Tally-provided dropdown choices for ledger mappings and Stock groups while remaining editable for intentional master creation. Similarity-ranked suggestions are allowed for invoice-review dynamic mappings, but SQL confirmed mappings remain the posting source of truth.
 - Refreshing Tally ledger/group dropdowns must not clear mapping fields; preserve
   saved/current values and fall back to `.env`/config defaults for new companies.

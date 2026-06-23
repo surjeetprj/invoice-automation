@@ -32,9 +32,7 @@ class TallyServiceTests(unittest.TestCase):
     """Exercise XML builders, response parsing, and workflow posting."""
 
     def setUp(self) -> None:
-        """Keep existing posting tests focused on Tally behavior, not licensing."""
-        self.license_patch = patch("desktop_app.services.workflow_tally.assert_tally_serial_allowed")
-        self.license_check = self.license_patch.start()
+        """Keep existing posting tests focused on Tally behavior."""
         self.workflow_settings_patch = patch(
             "desktop_app.services.workflow_tally.get_tally_settings",
             return_value=TallySettings(tally_company="Runtime Company"),
@@ -43,7 +41,6 @@ class TallyServiceTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.workflow_settings_patch.stop()
-        self.license_patch.stop()
 
     def sample_invoice_data(self) -> InvoiceData:
         """Return a purchase invoice with GST totals."""
@@ -761,68 +758,6 @@ class TallyServiceTests(unittest.TestCase):
                     workflow.post_invoice_items_to_tally(invoice_id)
                 client.post_inventory_purchase_voucher.assert_not_called()
 
-    def test_workflow_tally_post_is_blocked_before_preflight_when_license_rejects(self) -> None:
-        """Ledger-only Tally posting should fail before preflight or voucher calls."""
-        engine = self.make_engine()
-        invoice_id = self.create_invoice(engine)
-        workflow = DesktopWorkflow()
-        workflow._initialized = True
-        self.license_check.side_effect = ValueError("license blocked")
-        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
-            with patch("desktop_app.services.workflow.TallyClient") as client_cls:
-                client = client_cls.return_value
-                client.fetch_company_names.return_value = {"Runtime Company"}
-                client.fetch_tally_serial_number.return_value = "BAD-SERIAL"
-                with self.assertRaisesRegex(ValueError, "license blocked"):
-                    workflow.post_invoice_to_tally(invoice_id)
-
-        client.preflight_purchase_invoice.assert_not_called()
-        client.sync_vendor_master.assert_not_called()
-        client.sync_system_ledgers.assert_not_called()
-        client.post_purchase_voucher.assert_not_called()
-
-    def test_workflow_tally_item_post_is_blocked_before_preflight_when_license_rejects(self) -> None:
-        """Item-wise Tally posting should fail before inventory preflight or posting."""
-        engine = self.make_engine()
-        invoice_id = self.create_invoice(engine)
-        workflow = DesktopWorkflow()
-        workflow._initialized = True
-        self.license_check.side_effect = ValueError("license blocked")
-        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
-            with patch("desktop_app.services.workflow.TallyClient") as client_cls:
-                client = client_cls.return_value
-                client.fetch_company_names.return_value = {"Runtime Company"}
-                client.fetch_tally_serial_number.return_value = "BAD-SERIAL"
-                with self.assertRaisesRegex(ValueError, "license blocked"):
-                    workflow.post_invoice_items_to_tally(invoice_id)
-
-        client.preflight_inventory_purchase_invoice.assert_not_called()
-        client.sync_vendor_master.assert_not_called()
-        client.sync_system_ledgers.assert_not_called()
-        client.sync_inventory_item_masters.assert_not_called()
-        client.post_inventory_purchase_voucher.assert_not_called()
-
-    def test_workflow_tally_syncs_are_blocked_when_license_rejects(self) -> None:
-        """Vendor and system ledger syncs should also require a matching Tally serial."""
-        engine = self.make_engine()
-        invoice_id = self.create_invoice(engine)
-        workflow = DesktopWorkflow()
-        workflow._initialized = True
-        self.license_check.side_effect = ValueError("license blocked")
-        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
-            with patch("desktop_app.services.workflow.TallyClient") as client_cls:
-                client = client_cls.return_value
-                client.fetch_company_names.return_value = {"Runtime Company"}
-                client.fetch_tally_serial_number.return_value = "BAD-SERIAL"
-                with self.assertRaisesRegex(ValueError, "license blocked"):
-                    workflow.sync_vendor_master_to_tally(invoice_id)
-                with self.assertRaisesRegex(ValueError, "license blocked"):
-                    workflow.sync_tally_system_ledgers(invoice_id)
-
-        self.assertEqual(client.fetch_tally_serial_number.call_count, 2)
-        client.sync_vendor_master.assert_not_called()
-        client.sync_system_ledgers.assert_not_called()
-
     def test_workflow_blocks_tally_post_when_company_not_selected(self) -> None:
         """Direct Tally posting should require an explicit selected company."""
         engine = self.make_engine()
@@ -839,7 +774,6 @@ class TallyServiceTests(unittest.TestCase):
         client.fetch_company_names.assert_not_called()
         client.fetch_tally_serial_number.assert_not_called()
         client.preflight_purchase_invoice.assert_not_called()
-        self.license_check.assert_not_called()
 
     def test_workflow_blocks_tally_post_when_selected_company_is_not_open(self) -> None:
         """Direct Tally posting should stop when Tally does not return the selected company."""
@@ -858,10 +792,9 @@ class TallyServiceTests(unittest.TestCase):
         client.preflight_purchase_invoice.assert_not_called()
         client.create_missing_masters.assert_not_called()
         client.post_purchase_voucher.assert_not_called()
-        self.license_check.assert_not_called()
 
-    def test_downloadable_exports_do_not_check_tally_license(self) -> None:
-        """File-based exports should remain available without direct Tally serial checks."""
+    def test_downloadable_exports_do_not_check_tally_connection(self) -> None:
+        """File-based exports should remain available without direct Tally connection checks."""
         engine = self.make_engine()
         invoice_id = self.create_invoice(engine)
         workflow = DesktopWorkflow()
@@ -872,7 +805,6 @@ class TallyServiceTests(unittest.TestCase):
                 self.assertIsNotNone(filename)
                 self.assertTrue(content)
 
-        self.license_check.assert_not_called()
 
     def test_workflow_rejects_unapproved_invoice_for_tally_posting(self) -> None:
         """Only approved or already posted invoices can be posted to Tally."""

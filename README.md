@@ -97,7 +97,7 @@ Direct TallyPrime posting requires TallyPrime to be running locally with the
 target company open and HTTP enabled, usually at `http://localhost:9000`.
 The top bar includes a Company selector and Settings button for customer-editable
 Tally defaults, including the Stock Group for item-wise posting.
-Tally URL, timeout, selected company, and license file are saved globally in
+Tally URL, timeout, and selected company are saved globally in
 `InvoiceAI\settings.json`. Confirmed ledger/group mappings are stored in SQLite
 in `tally_master_mapping`, keyed by selected company and mapping type.
 Settings-page values such as `Vender A/C Group`, `Stock Group`, Purchase Ledger,
@@ -116,47 +116,7 @@ name while preserving the full invoice description separately. It can create
 required units, stock groups, and stock items, and it blocks before posting when
 reviewed item data is incomplete.
 
-Direct TallyPrime posting and Tally master sync also require a signed InvoiceAI
-license file whose allowed TallyPrime serial list matches the connected local
-TallyPrime installation. Configure `INVOICEAI_LICENSE_FILE` when the license
-file is not stored at the default app-data path. InvoiceAI verifies the TallyPrime serial only through the Product AboutPage HTTP/XML report. If Product AboutPage does not expose the serial, direct TallyPrime sync/post is blocked.
-
-## License Key Generation
-
-Do not manually choose or type a private key. Generate an Ed25519 key pair with
-a cryptographic random generator:
-
-```powershell
-cd C:\Users\surje\Documents\invoice_automation
-
-.\.venv\Scripts\python.exe -c "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey; from cryptography.hazmat.primitives import serialization; key=Ed25519PrivateKey.generate(); print('PRIVATE_KEY_HEX=' + key.private_bytes(encoding=serialization.Encoding.Raw, format=serialization.PrivateFormat.Raw, encryption_algorithm=serialization.NoEncryption()).hex()); print('PUBLIC_KEY_HEX=' + key.public_key().public_bytes(encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw).hex())"
-```
-
-Keep `PRIVATE_KEY_HEX` secret and never commit it. Replace `PUBLIC_KEY_HEX` in
-`desktop_app/services/licensing.py` before building a customer release.
-
-Use the private key only to generate signed customer license files:
-
-```powershell
-$env:INVOICEAI_LICENSE_PRIVATE_KEY_HEX="your-private-key-hex"
-
-.\.venv\Scripts\python.exe desktop_app\tools\sign_license.py `
-  --customer "Customer Name" `
-  --serial "TALLY-SERIAL-NUMBER" `
-  --output "invoiceai_license.json"
-```
-
-Place `invoiceai_license.json` at the default app runtime location on the customer machine:
-
-```text
-C:\Users\<WindowsUser>\AppData\Local\InvoiceAI\invoiceai_license.json
-```
-
-Alternatively, store it anywhere safe and set `INVOICEAI_LICENSE_FILE` in
-`desktop_app\.env` to the full file path.
-
-Share only `invoiceai_license.json` with the customer. If the private key leaks,
-rotate the key pair and ship a new app build with the new public key.
+The Settings dialog `Test Connection` action reads the local TallyPrime serial number from the Product AboutPage HTTP/XML report and displays it for support visibility only. Direct TallyPrime export does not verify a signed InvoiceAI license.
 
 ## Developer Context
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any
 
 from .. import config
@@ -13,7 +12,6 @@ SETTINGS_FILE = config.RUNTIME_DIR / "settings.json"
 
 GLOBAL_KEYS = {
     "tally_url",
-    "invoiceai_license_file",
     "tally_timeout_seconds",
     "selected_company",
 }
@@ -34,7 +32,6 @@ class TallySettings:
 
     tally_url: str = config.TALLY_URL
     tally_company: str = config.TALLY_COMPANY
-    invoiceai_license_file: str = config.INVOICEAI_LICENSE_FILE
     tally_timeout_seconds: int = config.TALLY_TIMEOUT_SECONDS
     tally_vendor_parent_ledger: str = config.TALLY_VENDOR_PARENT_LEDGER
     default_stock_group: str = config.DEFAULT_STOCK_GROUP
@@ -126,7 +123,6 @@ def build_global_settings(payload: dict[str, Any]) -> dict[str, Any]:
     selected_company = payload.get("selected_company", payload.get("tally_company", config.TALLY_COMPANY))
     return {
         "tally_url": str(payload.get("tally_url", config.TALLY_URL) or "").strip(),
-        "invoiceai_license_file": str(payload.get("invoiceai_license_file", config.INVOICEAI_LICENSE_FILE) or "").strip(),
         "tally_timeout_seconds": positive_int(payload.get("tally_timeout_seconds"), timeout_default),
         "selected_company": str(selected_company or "").strip(),
     }
@@ -163,7 +159,6 @@ def settings_from_document(document: dict[str, Any]) -> TallySettings:
     return TallySettings(
         tally_url=global_settings["tally_url"],
         tally_company=selected_company,
-        invoiceai_license_file=global_settings["invoiceai_license_file"],
         tally_timeout_seconds=global_settings["tally_timeout_seconds"],
         **default_company_mapping(),
     )
@@ -181,7 +176,6 @@ def build_tally_settings(payload: dict[str, Any]) -> TallySettings:
     return TallySettings(
         tally_url=global_settings["tally_url"],
         tally_company=selected_company,
-        invoiceai_license_file=global_settings["invoiceai_license_file"],
         tally_timeout_seconds=global_settings["tally_timeout_seconds"],
         **mapping,
     )
@@ -194,8 +188,3 @@ def positive_int(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed > 0 else default
-
-
-def license_file_path(settings: TallySettings | None = None) -> str:
-    """Return the active license path for Tally license checks."""
-    return (settings or get_tally_settings()).invoiceai_license_file or config.INVOICEAI_LICENSE_FILE

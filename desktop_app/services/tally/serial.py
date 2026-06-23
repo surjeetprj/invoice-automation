@@ -23,7 +23,7 @@ def tally_response_summary(value: str | None, *, limit: int = 220) -> str:
 
 
 def build_tally_about_page_xml() -> bytes:
-    """Build a Tally Product AboutPage export request for license information."""
+    """Build a Tally Product AboutPage export request for product information."""
     envelope = Element("ENVELOPE")
     header = SubElement(envelope, "HEADER")
     SubElement(header, "VERSION").text = "1"

@@ -70,18 +70,17 @@ class TallyClient:
 
     def fetch_tally_serial_number(self) -> str:
         """Return the connected TallyPrime serial from Product AboutPage."""
-        logger.info("Tally serial verification started")
+        logger.info("Tally serial lookup started")
         logger.info("Tally serial probe started: Product AboutPage")
         raw = self.post_xml(build_tally_about_page_xml())
         serial = parse_tally_about_page_serial_number(raw)
         if serial:
-            logger.info("Tally serial verified using Product AboutPage probe: %s", mask_serial(serial))
+            logger.info("Tally serial detected using Product AboutPage probe: %s", mask_serial(serial))
             return serial
 
         logger.error("Tally serial probe did not return a serial: Product AboutPage | response=%s", tally_response_summary(raw))
         raise ConnectionError(
-            "Could not verify TallyPrime serial number. Product AboutPage did not expose the "
-            "TallyPrime serial number. TallyPrime export is blocked for this license."
+            "Could not read TallyPrime serial number. Product AboutPage did not expose the TallyPrime serial number."
         )
 
     def check_connection(self) -> None:

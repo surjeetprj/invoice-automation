@@ -38,7 +38,7 @@ invoice remains available for review.
 - `services/workflow.py`: UI-facing invoice lifecycle orchestration.
 - `services/workflow_pipeline.py`: upload/reprocess pipeline utility helpers.
 - `services/workflow_review.py`: review decision, correction persistence, and validation refresh helpers.
-- `services/workflow_tally.py`: selected-company and signed-license guards for direct Tally actions.
+- `services/workflow_tally.py`: selected-company guard for direct Tally actions.
 - `services/parsing/ai_parser.py`: parser facade for text and visual invoice sources.
 - `services/parsing/ai_client.py`: Gemini structured-output clients using the
   configured model.
@@ -134,18 +134,6 @@ The review flow separates saving corrections from approval:
   page from the saved payload.
 - `Approve` is the only UI action that marks the invoice approved.
 
-## TallyPrime License Gate
+## TallyPrime Serial Display
 
-Direct TallyPrime preflight, master sync, and voucher posting are protected by a
-signed local InvoiceAI license. The workflow asks `TallyClient` for the connected
-TallyPrime serial number, then `services/licensing.py` verifies that the serial
-appears in the signed allow-list. Upload, AI extraction, review, approval,
-downloadable CSV/JSON/Tally XML exports, and ERPNext export are not blocked by
-this license gate.
-
-The license file defaults to the app runtime directory as
-`invoiceai_license.json`, or `INVOICEAI_LICENSE_FILE` may point to a custom path.
-InvoiceAI verifies the connected TallyPrime serial only by exporting the Product AboutPage report and reading its `Serial Number` field. If Product AboutPage does not expose a serial, direct TallyPrime sync/post is blocked before any master or voucher request.
-
-License files are signed with Ed25519. The app embeds only the public key. The
-private signing key and generated customer license files must remain outside git.
+The Settings dialog `Test Connection` action asks `TallyClient` for the connected TallyPrime serial number using the Product AboutPage HTTP/XML report. The serial is displayed for support visibility only. Direct TallyPrime preflight, master sync, and voucher posting are guarded by selected-company verification, approval status, reviewer confirmation, and Tally response handling, not by a signed InvoiceAI license.

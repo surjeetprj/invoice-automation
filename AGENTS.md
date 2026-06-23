@@ -32,7 +32,7 @@ Working rules:
 - Keep workflow orchestration in `desktop_app/services/workflow.py`; upload
   pipeline utilities live in `desktop_app/services/workflow_pipeline.py`, review
   persistence helpers live in `desktop_app/services/workflow_review.py`, and
-  Tally company/license guard helpers live in `desktop_app/services/workflow_tally.py`.
+  Tally selected-company guard helpers live in `desktop_app/services/workflow_tally.py`.
 - Keep parsing services in `desktop_app/services/parsing`, document services in
   `desktop_app/services/documents`, and export services in
   `desktop_app/services/exports`.
@@ -46,12 +46,7 @@ Working rules:
 - Keep direct TallyPrime HTTP/XML posting services in
   `desktop_app/services/tally`; file-based downloadable exports remain in
   `desktop_app/services/exports`.
-- TallyPrime direct actions are serial-locked through signed local licenses.
-  Keep license verification in `desktop_app/services/licensing.py`, Tally serial
-  XML/parsing helpers in `desktop_app/services/tally/serial.py`, master preflight
-  helpers in `desktop_app/services/tally/preflight.py`, and support signing tools
-  in `desktop_app/tools`. Do not commit private keys or generated license files.
-  Serial probing must use only the Tally HTTP/XML Product AboutPage report; do not add company-identity or `.env` serial fallbacks.
+- TallyPrime direct actions are not license-gated. Keep the selected-company guard in `desktop_app/services/workflow_tally.py`. The Settings dialog may read the local TallyPrime serial using the Product AboutPage HTTP/XML report for display only; do not use the serial as an export restriction.
 - Keep TallyPrime ledger-only and item-wise purchase posting behavior explicit
   in workflow and UI labels. Ledger-only posting creates accounting purchase
   vouchers; item-wise posting creates inventory purchase vouchers with stock

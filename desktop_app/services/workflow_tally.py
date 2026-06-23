@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import logging
 
-from .licensing import assert_tally_serial_allowed
-from .settings import get_tally_settings, license_file_path
+from .settings import get_tally_settings
 from .tally import TallyClient
-from .tally.serial import mask_serial
 
 logger = logging.getLogger(__name__)
 
@@ -32,17 +30,3 @@ def assert_tally_company_selected(client: TallyClient) -> None:
             f"Selected: {selected_company}. Available: {available_text}."
         )
     logger.info("Tally company verification passed for %s", selected_company)
-
-
-def assert_tally_license(client: TallyClient) -> None:
-    """Verify that the connected TallyPrime serial is licensed for direct export."""
-    logger.info("Tally license verification started")
-    serial = client.fetch_tally_serial_number()
-    active_license_file = license_file_path()
-    logger.info(
-        "Tally license allow-list check started for serial %s using license file: %s",
-        mask_serial(serial),
-        active_license_file,
-    )
-    assert_tally_serial_allowed(serial, active_license_file)
-    logger.info("Tally license verification passed for serial %s", mask_serial(serial))

@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
-    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -38,19 +37,11 @@ class SettingsDialog(QDialog):
         self.serial_number = QLineEdit()
         self.serial_number.setReadOnly(True)
         self.serial_number.setPlaceholderText("Use Test Connection to detect")
-        self.license_file = QLineEdit()
         self.timeout_seconds = QSpinBox()
         self.timeout_seconds.setRange(1, 300)
 
-        license_row = QHBoxLayout()
-        license_row.setContentsMargins(0, 0, 0, 0)
-        license_row.addWidget(self.license_file, stretch=1)
-        self.browse_license_btn = QPushButton("Browse License")
-        license_row.addWidget(self.browse_license_btn)
-
         tally_form.addRow("Tally URL", self.tally_url)
         tally_form.addRow("Tally Serial Number", self.serial_number)
-        tally_form.addRow("License File", license_row)
         tally_form.addRow("Timeout Seconds", self.timeout_seconds)
         layout.addWidget(tally_group)
 
@@ -93,7 +84,6 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        self.browse_license_btn.clicked.connect(self.browse_license)
         self.company.activated.connect(lambda _index: self.load_company_mapping())
         if self.company.lineEdit():
             self.company.lineEdit().editingFinished.connect(self.load_company_mapping)
@@ -119,7 +109,6 @@ class SettingsDialog(QDialog):
             self.set_companies([selected_company, *self.company_mappings.keys()])
             self.company.setCurrentText(selected_company)
             self.serial_number.setText(str(settings.get("tally_serial_number_display") or ""))
-            self.license_file.setText(str(settings.get("invoiceai_license_file") or ""))
             self.timeout_seconds.setValue(int(settings.get("tally_timeout_seconds") or 20))
             self.load_company_mapping(settings)
         finally:
@@ -192,7 +181,6 @@ class SettingsDialog(QDialog):
             "tally_url": self.tally_url.text().strip(),
             "selected_company": company,
             "tally_company": company,
-            "invoiceai_license_file": self.license_file.text().strip(),
             "tally_timeout_seconds": self.timeout_seconds.value(),
             "tally_vendor_parent_ledger": self.combo_text(self.vendor_parent),
             "default_stock_group": self.combo_text(self.default_stock_group),
@@ -231,14 +219,3 @@ class SettingsDialog(QDialog):
         combo.addItems(unique)
         combo.setCurrentText(current)
         combo.blockSignals(False)
-
-    def browse_license(self) -> None:
-        """Select a signed InvoiceAI license file."""
-        path, _selected_filter = QFileDialog.getOpenFileName(
-            self,
-            "Select InvoiceAI License",
-            self.license_file.text().strip(),
-            "JSON Files (*.json);;All Files (*.*)",
-        )
-        if path:
-            self.license_file.setText(path)

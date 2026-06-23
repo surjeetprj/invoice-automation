@@ -11,7 +11,7 @@ from desktop_app.services.tally.serial import build_tally_about_page_xml, parse_
 
 
 class TallyClientTests(unittest.TestCase):
-    """Exercise Tally response parsing and Product AboutPage serial verification."""
+    """Exercise Tally response parsing and Product AboutPage serial lookup."""
 
     def test_tally_response_parses_success_failure_and_malformed_xml(self) -> None:
         """Tally responses should normalize success and failure cases."""
@@ -59,10 +59,10 @@ class TallyClientTests(unittest.TestCase):
 
         self.assertEqual(post_xml.call_count, 1)
         self.assertIn(b"Product AboutPage", post_xml.call_args.args[0])
-        self.assertIn("Tally serial verified using Product AboutPage probe", "\n".join(logs.output))
+        self.assertIn("Tally serial detected using Product AboutPage probe", "\n".join(logs.output))
 
     def test_tally_client_fails_closed_when_about_page_has_no_serial(self) -> None:
-        """Missing Product AboutPage serial should block TallyPrime export."""
+        """Missing Product AboutPage serial should fail the settings serial lookup."""
         client = TallyClient()
         with self.assertLogs("desktop_app.services.tally.client", level="ERROR") as logs:
             with patch.object(
