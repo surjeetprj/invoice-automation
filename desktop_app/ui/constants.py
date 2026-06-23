@@ -26,7 +26,7 @@ LINE_FLOAT_FIELDS = {
 }
 
 FIELD_GROUPS = {
-    "Voucher Details": ["invoice_number", "date", "due_date", "place_of_supply", "amount_in_words"],
+    "Voucher Details": ["invoice_number", "date", "due_date", "place_of_supply"],
     "Vendor / Party Details": ["vendor_name", "vendor_address", "vendor_gstin", "vendor_state_code", "vendor_pan", "vendor_msme_no", "vendor_contact"],
     "Customer / Buyer Details": ["customer_name", "customer_address", "customer_gstin", "customer_state_code", "customer_pan", "customer_phone"],
     "Shipping & Transport": ["shipping_name", "shipping_address", "shipping_gstin", "transport_name", "transport_id", "vehicle_number", "challan_no", "challan_date", "e_way_bill_no", "irn", "ack_number", "ack_date"],

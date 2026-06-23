@@ -6,7 +6,7 @@ import copy
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QDoubleValidator
+from PySide6.QtGui import QAction, QDoubleValidator, QKeySequence
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSplitter,
     QTabWidget,
+    QTextEdit,
     QMenu,
     QToolButton,
     QVBoxLayout,
@@ -29,6 +30,7 @@ from .constants import COLLAPSIBLE_FIELD_GROUPS, EXPORT_ACTIONS, FIELD_GROUPS, N
 from .widgets.audit_pane import AuditPane
 from .widgets.line_items_table import LineItemsTable
 from .widgets.pdf_preview import PdfPreview
+from .widgets.tally_mappings_table import TallyMappingsTable
 from .widgets.validation_pane import ValidationPane
 
 
@@ -99,14 +101,17 @@ class MetadataForm(QWidget):
 
     changed = Signal()
 
-    def __init__(self, line_items: LineItemsTable) -> None:
+    def __init__(self, line_items: LineItemsTable, tally_mappings: TallyMappingsTable) -> None:
         """Build all metadata fields and group containers."""
         super().__init__()
         self.fields: dict[str, QLineEdit] = {}
         self.labels: dict[str, QLabel] = {}
         self.sections: dict[str, CollapsibleSection] = {}
         self.line_items = line_items
+        self.tally_mappings = tally_mappings
         self.line_items_section: CollapsibleSection | None = None
+        self.tally_mappings_section: CollapsibleSection | None = None
+        
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
@@ -126,7 +131,14 @@ class MetadataForm(QWidget):
         self.line_items_section.content_layout.addWidget(self.line_items)
         body_layout.addWidget(self.line_items_section)
 
-        for group in ("Shipping & Transport", "Bank Details", "Tax & Totals"):
+        self.tally_mappings_section = CollapsibleSection("Tally Mapping", collapsible=True, expanded=True)
+        self.tally_mappings_section.content_layout.addWidget(self.tally_mappings)
+        body_layout.addWidget(self.tally_mappings_section)
+
+        # Move Tax & Totals immediately after Tally Mapping section
+        self.add_field_section(body_layout, "Tax & Totals", FIELD_GROUPS["Tax & Totals"])
+
+        for group in ("Shipping & Transport", "Bank Details"):
             self.add_field_section(
                 body_layout,
                 group,
@@ -158,7 +170,7 @@ class MetadataForm(QWidget):
         collapsible: bool = False,
         expanded: bool = True,
     ) -> CollapsibleSection:
-        """Return one compact two-column metadata section."""
+        """Return one compact two-column metadata section with left-packed inputs."""
         section = CollapsibleSection(title, collapsible=collapsible, expanded=expanded)
         self.sections[title] = section
         grid = QGridLayout()
@@ -172,6 +184,7 @@ class MetadataForm(QWidget):
             label.setObjectName("requiredLabel" if field in REQUIRED_METADATA_FIELDS else "fieldLabel")
             edit = QLineEdit()
             edit.setMinimumWidth(150)
+            edit.setMaximumWidth(220)
             if field in NUMERIC_FIELDS:
                 edit.setValidator(QDoubleValidator(bottom=-999999999.0, top=999999999.0, decimals=2))
             edit.textChanged.connect(lambda _text, signal=self.changed: signal.emit())
@@ -180,8 +193,7 @@ class MetadataForm(QWidget):
             self.labels[field] = label
             grid.addWidget(label, row, offset)
             grid.addWidget(edit, row, offset + 1)
-        grid.setColumnStretch(1, 1)
-        grid.setColumnStretch(3, 1)
+        grid.setColumnStretch(4, 1)
         section.content_layout.addLayout(grid)
         return section
 
@@ -201,12 +213,11 @@ class MetadataForm(QWidget):
         self.update_required_state()
 
     def update_optional_collapses(self, data: dict[str, Any]) -> None:
-        """Collapse optional sections that have no extracted values."""
+        """Collapse optional sections by default when loading data."""
         for group in COLLAPSIBLE_FIELD_GROUPS:
             section = self.sections.get(group)
-            fields = FIELD_GROUPS.get(group, [])
             if section:
-                section.set_collapsed(not any(str(data.get(field) or "").strip() for field in fields))
+                section.set_collapsed(True)
 
     def set_line_item_count(self, count: int) -> None:
         """Update required state for the embedded line-item section."""
@@ -284,6 +295,7 @@ class DetailPage(QWidget):
         super().__init__()
         self.invoice: dict[str, Any] | None = None
         self.original_data: dict[str, Any] = {}
+        self.original_mappings: list[dict[str, Any]] = []
         self.dirty = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)
@@ -304,16 +316,26 @@ class DetailPage(QWidget):
         splitter = self.splitter
         self.tabs = QTabWidget()
         self.line_items = LineItemsTable()
-        self.metadata = MetadataForm(self.line_items)
+        self.tally_mappings = TallyMappingsTable()
+        self.metadata = MetadataForm(self.line_items, self.tally_mappings)
         self.validation = ValidationPane()
         self.audit = AuditPane()
+
+        # Raw Markdown comparison view
+        self.raw_text_pane = QTextEdit()
+        self.raw_text_pane.setReadOnly(True)
+        self.raw_text_pane.setObjectName("rawTextPane")
+
         self.metadata.changed.connect(self.mark_dirty)
         self.line_items.changed.connect(self.mark_dirty)
+        self.tally_mappings.changed.connect(self.mark_dirty)
         self.line_items.changed.connect(lambda: self.metadata.set_line_item_count(self.line_items.table.rowCount()))
         self.audit.load_requested.connect(self.request_audit)
+
         self.tabs.addTab(self.metadata, "Metadata")
         self.tabs.addTab(self.validation, "Validation")
         self.tabs.addTab(self.audit, "Audit Logs")
+        self.tabs.addTab(self.raw_text_pane, "Raw Markdown")
         self.tabs.currentChanged.connect(self.tab_changed)
 
         pdf_panel = QFrame()
@@ -328,16 +350,26 @@ class DetailPage(QWidget):
 
         splitter.addWidget(self.tabs)
         splitter.addWidget(pdf_panel)
-        splitter.setSizes([820, 460])
+        splitter.setSizes([600, 400])
         splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(1, 2)
         layout.addWidget(splitter, stretch=1)
 
         footer = QHBoxLayout()
-        self.approve_btn = QPushButton("Approve")
-        self.corrections_btn = QPushButton("Submit Corrections")
-        self.reject_btn = QPushButton("Reject")
-        self.reprocess_btn = QPushButton("Reprocess")
+
+        # Buttons with hotkeys / shortcuts
+        self.approve_btn = QPushButton("Approve (Alt+A)")
+        self.approve_btn.setShortcut(QKeySequence("Alt+A"))
+
+        self.corrections_btn = QPushButton("Submit Corrections (Alt+C)")
+        self.corrections_btn.setShortcut(QKeySequence("Alt+C"))
+
+        self.reject_btn = QPushButton("Reject (Alt+R)")
+        self.reject_btn.setShortcut(QKeySequence("Alt+R"))
+
+        self.reprocess_btn = QPushButton("Reprocess (Alt+P)")
+        self.reprocess_btn.setShortcut(QKeySequence("Alt+P"))
+
         self.export_btn = QToolButton()
         self.export_btn.setText("Export Data")
         self.export_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -347,10 +379,12 @@ class DetailPage(QWidget):
             action.triggered.connect(lambda _checked=False, f=fmt: self.request_export(f))
             menu.addAction(action)
         self.export_btn.setMenu(menu)
+
         self.approve_btn.clicked.connect(self.request_approve)
         self.corrections_btn.clicked.connect(self.request_corrections)
         self.reject_btn.clicked.connect(self.request_reject)
         self.reprocess_btn.clicked.connect(self.request_reprocess)
+
         footer.addStretch()
         for button in (self.approve_btn, self.corrections_btn, self.reject_btn, self.reprocess_btn, self.export_btn):
             footer.addWidget(button)
@@ -360,11 +394,17 @@ class DetailPage(QWidget):
         """Populate the detail page from an invoice record."""
         self.invoice = invoice
         self.original_data = copy.deepcopy(invoice.get("extracted_data") or {})
+        self.original_mappings = copy.deepcopy(invoice.get("tally_mappings") or [])
         confidence = invoice.get("confidence_score")
         self.title.setText(f"Invoice #{invoice.get('id')} - {invoice.get('status')}")
         self.summary.setText(f"Confidence: {float(confidence) * 100:.0f}%" if confidence is not None else "")
+
+        # Load raw markdown if present
+        self.raw_text_pane.setText(invoice.get("raw_markdown") or "No raw markdown available.")
+
         self.metadata.load_data(self.original_data)
         self.line_items.load_items(self.original_data.get("line_items") or [])
+        self.tally_mappings.load_mappings(self.original_mappings)
         self.metadata.set_line_item_count(self.line_items.table.rowCount())
         self.validation.set_validation(invoice.get("validation"))
         self.audit.set_logs([])
@@ -408,7 +448,11 @@ class DetailPage(QWidget):
         """Return only changed metadata and line item values."""
         current = self.metadata.values()
         current["line_items"] = self.line_items.values()
-        return {key: value for key, value in current.items() if value != self.original_data.get(key)}
+        corrections = {key: value for key, value in current.items() if value != self.original_data.get(key)}
+        changed_mappings = self.tally_mappings.changed_values()
+        if changed_mappings:
+            corrections["tally_mappings"] = changed_mappings
+        return corrections
 
     def request_audit(self) -> None:
         """Request audit logs for the current invoice."""
