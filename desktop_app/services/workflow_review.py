@@ -70,7 +70,7 @@ def persist_review_corrections(db, invoice: Invoice, review: InvoiceReviewReques
             current[field] = value
             changed.append(field)
     if mapping_rows:
-        company_name = get_tally_settings().tally_company
+        company_name = mapping_company_name(mapping_rows)
         saved = save_mappings(db, company_name, mapping_rows)
         if saved:
             audit(invoice.id, f"HITL: Tally mappings saved - {saved} row(s)", "Manual mapping during review", review.reviewer)
@@ -82,3 +82,20 @@ def persist_review_corrections(db, invoice: Invoice, review: InvoiceReviewReques
     mime_type = invoice.extraction.mime_type if invoice.extraction else None
     persist_extraction(db, invoice, data, validation, raw_markdown, document_kind=document_kind, mime_type=mime_type)
     return changed
+
+
+def mapping_company_name(mapping_rows: list[dict]) -> str:
+    """Return the intended company for submitted review mapping rows."""
+    explicit_rows = [row for row in mapping_rows if isinstance(row, dict) and "company_name" in row]
+    if explicit_rows and any(not str(row.get("company_name") or "").strip() for row in explicit_rows):
+        raise ValueError("Tally mapping corrections must include a Tally company.")
+    companies = {
+        str(row.get("company_name") or "").strip()
+        for row in explicit_rows
+        if str(row.get("company_name") or "").strip()
+    }
+    if len(companies) > 1:
+        raise ValueError("Tally mapping corrections must target one Tally company.")
+    if companies:
+        return next(iter(companies))
+    return (get_tally_settings().tally_company or "").strip()

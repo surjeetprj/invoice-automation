@@ -15,6 +15,7 @@ from desktop_app.ui.detail_page import DetailPage
 from desktop_app.ui.main_window import MainWindow
 from desktop_app.ui.settings_dialog import SettingsDialog
 from desktop_app.ui.upload_page import UploadPage
+from desktop_app.ui.widgets.tally_mappings_table import TallyMappingsTable
 from desktop_app.ui.widgets.worker import Worker
 
 
@@ -379,6 +380,32 @@ class DetailPageLayoutTests(unittest.TestCase):
             self.assertEqual(dialog.settings_payload()["purchase_ledger_name"], "Custom Purchase")
         finally:
             dialog.deleteLater()
+
+    def test_tally_mappings_table_preserves_company_context_in_changed_rows(self) -> None:
+        """Mapping edits should keep the company used when the row was generated."""
+        table = TallyMappingsTable()
+        try:
+            table.load_mappings(
+                [
+                    {
+                        "mapping_type": "VENDOR_LEDGER",
+                        "source_value": "Shree Medical",
+                        "company_name": "Company A",
+                        "tally_value": "Shree Medical",
+                        "is_active": "Y",
+                        "candidates": ["Shree Medical Agencies"],
+                    }
+                ]
+            )
+            combo = table.table.cellWidget(0, 2)
+            combo.setCurrentText("Shree Medical Agencies")
+
+            changed = table.changed_values()
+            self.assertEqual(len(changed), 1)
+            self.assertEqual(changed[0]["company_name"], "Company A")
+            self.assertEqual(changed[0]["tally_value"], "Shree Medical Agencies")
+        finally:
+            table.deleteLater()
 
     def test_upload_page_status_replaces_processing_steps(self) -> None:
         """Upload status should show only one latest processing message."""

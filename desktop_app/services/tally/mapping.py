@@ -260,6 +260,7 @@ def dynamic_mapping_rows(
         rows.append({
             "mapping_type": mapping_type(type_value),
             "source_value": source_value,
+            "company_name": normalize_text(company_name),
             "tally_value": mapped or suggested,
             "is_active": "Y",
             "candidates": [item["value"] for item in ranked],

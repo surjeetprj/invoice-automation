@@ -12,8 +12,11 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session
 
-from desktop_app.db.models import Base, TallyMasterMapping
-from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail
+from desktop_app.config import InvoiceStatus
+from desktop_app.db.models import Base, Invoice, TallyMasterMapping
+from desktop_app.db.repository import persist_extraction
+from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail, ValidationResult
+from desktop_app.services.settings import TallySettings
 from desktop_app.services.tally.mapping import (
     DEFAULT_SOURCE,
     INPUT_CGST_LEDGER,
@@ -34,6 +37,7 @@ from desktop_app.services.tally.mapping import (
 from desktop_app.services.tally.masters import required_inventory_purchase_masters
 from desktop_app.services.tally.vouchers import build_inventory_purchase_voucher_xml, build_purchase_voucher_xml
 from desktop_app.services.workflow import DesktopWorkflow
+from desktop_app.services.workflow_review import mapping_company_name
 
 
 class TallyMasterMappingTests(unittest.TestCase):
@@ -136,6 +140,8 @@ class TallyMasterMappingTests(unittest.TestCase):
             )
         vendor = next(row for row in rows if row["mapping_type"] == VENDOR_LEDGER)
         stock = next(row for row in rows if row["mapping_type"] == STOCK_ITEM)
+        self.assertEqual(vendor["company_name"], "ABC Enterprises")
+        self.assertEqual(stock["company_name"], "ABC Enterprises")
         self.assertEqual(vendor["tally_value"], "Shree Medical Agencies")
         self.assertEqual(stock["tally_value"], "Saral IncomeTax")
         self.assertGreaterEqual(vendor["match_score"], ranked_candidates("Shree Medical", ["Other Ledger"])[0]["score"])
@@ -185,6 +191,98 @@ class TallyMasterMappingTests(unittest.TestCase):
         self.assertIn("<STOCKITEMNAME>Saral IncomeTax Local</STOCKITEMNAME>", item_xml)
         self.assertIn("<ACTUALQTY>1 Pcs</ACTUALQTY>", item_xml)
         self.assertIn("Unit Master: Pcs", [master.label for master in masters])
+
+    def test_review_mapping_save_uses_payload_company_after_settings_switch(self) -> None:
+        """Submitting review mappings should save under the company used to build the row."""
+        engine = create_engine("sqlite://", future=True, connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        data = self.sample_invoice()
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = Invoice(filename="invoice.pdf", file_path="C:/tmp/invoice.pdf", status=InvoiceStatus.PENDING_REVIEW)
+            db.add(invoice)
+            db.flush()
+            persist_extraction(db, invoice, data, ValidationResult(is_valid=True), "raw text")
+            db.commit()
+            invoice_id = invoice.id
+
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            with (
+                patch("desktop_app.services.workflow.get_tally_settings", return_value=TallySettings(tally_company="Company A")),
+                patch("desktop_app.services.workflow.TallyClient") as client_cls,
+            ):
+                client_cls.return_value.fetch_master_names.return_value = set()
+                record = workflow.get_invoice(invoice_id)
+
+            mapping_row = next(row for row in record["tally_mappings"] if row["mapping_type"] == VENDOR_LEDGER)
+            self.assertEqual(mapping_row["company_name"], "Company A")
+            mapping_row["tally_value"] = "Shree Medical Agencies"
+
+            with patch("desktop_app.services.workflow_review.get_tally_settings", return_value=TallySettings(tally_company="Company B")):
+                workflow.submit_review(
+                    invoice_id,
+                    {
+                        "decision": "save_corrections",
+                        "reviewer": "reviewer",
+                        "corrections": {"tally_mappings": [mapping_row]},
+                    },
+                )
+
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            self.assertEqual(get_mapping(db, "Company A", VENDOR_LEDGER, "Shree Medical"), "Shree Medical Agencies")
+            self.assertIsNone(get_mapping(db, "Company B", VENDOR_LEDGER, "Shree Medical"))
+
+    def test_approve_with_corrections_mapping_save_uses_payload_company(self) -> None:
+        """Approve-with-corrections should preserve mapping company and still approve."""
+        engine = create_engine("sqlite://", future=True, connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        data = self.sample_invoice()
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = Invoice(filename="invoice.pdf", file_path="C:/tmp/invoice.pdf", status=InvoiceStatus.PENDING_REVIEW)
+            db.add(invoice)
+            db.flush()
+            persist_extraction(db, invoice, data, ValidationResult(is_valid=True), "raw text")
+            db.commit()
+            invoice_id = invoice.id
+
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        mapping_row = {
+            "mapping_type": STOCK_ITEM,
+            "source_value": "Saral IncomeTax",
+            "company_name": "Company A",
+            "tally_value": "Saral IncomeTax Local",
+            "is_active": "Y",
+        }
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            with patch("desktop_app.services.workflow_review.get_tally_settings", return_value=TallySettings(tally_company="Company B")):
+                workflow.submit_review(
+                    invoice_id,
+                    {
+                        "decision": "approve_with_corrections",
+                        "reviewer": "reviewer",
+                        "corrections": {"tally_mappings": [mapping_row]},
+                    },
+                )
+
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = db.get(Invoice, invoice_id)
+            self.assertIsNotNone(invoice)
+            assert invoice is not None
+            self.assertEqual(invoice.status, InvoiceStatus.APPROVED)
+            self.assertEqual(get_mapping(db, "Company A", STOCK_ITEM, "Saral IncomeTax"), "Saral IncomeTax Local")
+            self.assertIsNone(get_mapping(db, "Company B", STOCK_ITEM, "Saral IncomeTax"))
+
+    def test_review_mapping_company_context_must_be_single_and_non_empty(self) -> None:
+        """Current UI mapping payloads should not mix or omit company context."""
+        with self.assertRaisesRegex(ValueError, "one Tally company"):
+            mapping_company_name([
+                {"company_name": "Company A", "mapping_type": VENDOR_LEDGER},
+                {"company_name": "Company B", "mapping_type": STOCK_ITEM},
+            ])
+        with self.assertRaisesRegex(ValueError, "include a Tally company"):
+            mapping_company_name([{"company_name": "", "mapping_type": VENDOR_LEDGER}])
 
 
 if __name__ == "__main__":

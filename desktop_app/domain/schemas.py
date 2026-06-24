@@ -225,6 +225,7 @@ class TallyMappingRecord(BaseModel):
 
     mapping_type: str
     source_value: str
+    company_name: str | None = None
     tally_value: str | None = None
     is_active: str = "Y"
     candidates: list[str] = Field(default_factory=list)

@@ -41,6 +41,9 @@ Working rules:
   Confirmed Tally master mappings live in SQLite `tally_master_mapping`
   rows. Settings-page defaults use `source_value = "DEFAULT"`; invoice review
   shows only dynamic mappings such as vendor ledger, stock item, and unit.
+  Review-page mapping rows must carry the company used when they were
+  generated; saving corrections must use that submitted company context, not
+  the current top-bar/Settings company selected later.
   Refreshing Tally dropdown choices must preserve current values and use
   `.env`/config defaults when no SQL mapping exists.
 - Keep direct TallyPrime HTTP/XML posting services in

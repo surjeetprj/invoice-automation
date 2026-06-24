@@ -88,7 +88,10 @@ vendor ledger, stock item, and unit. The Settings dialog can query TallyPrime
 for company, ledger, and stock group choices without requiring users to type
 existing master names manually. Master refreshes populate dropdown choices only;
 they preserve the current mapping values and use `.env`/config defaults when a
-company has no saved SQL mapping yet.
+company has no saved SQL mapping yet. Review-page mapping rows include the
+company used to generate their SQL lookups and suggestions. Correction saves use
+that submitted company context so a later top-bar or Settings company change
+does not save mappings under the wrong company.
 
 Direct TallyPrime posting has two explicit modes:
 
@@ -129,6 +132,9 @@ The review flow separates saving corrections from approval:
 
 - `Submit Corrections` persists edited invoice fields and line items, refreshes
   validation, and keeps the existing invoice status, normally `Pending_Review`.
+- Tally mapping edits submitted from review are saved against the company
+  attached to those displayed mapping rows, not the current global company if it
+  changed after the invoice was opened.
 - Reviewers can submit corrections repeatedly; each save reloads the detail
   page from the saved payload.
 - `Approve` is the only UI action that marks the invoice approved.

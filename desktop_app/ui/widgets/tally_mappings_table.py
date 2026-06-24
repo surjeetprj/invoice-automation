@@ -65,6 +65,7 @@ class TallyMappingsTable(QWidget):
             combo.currentTextChanged.connect(lambda _text: self.changed.emit())
             combo.setProperty("mapping_type", str(row.get("mapping_type") or ""))
             combo.setProperty("source_value", str(row.get("source_value") or ""))
+            combo.setProperty("company_name", str(row.get("company_name") or ""))
             self.table.setCellWidget(row_index, 2, combo)
         self.table.blockSignals(False)
         self.table.resizeColumnsToContents()
@@ -90,6 +91,7 @@ class TallyMappingsTable(QWidget):
             row = {
                 "mapping_type": str(combo.property("mapping_type") or ""),
                 "source_value": str(combo.property("source_value") or ""),
+                "company_name": str(combo.property("company_name") or ""),
                 "tally_value": combo.currentText().strip(),
                 "is_active": "Y",
             }
@@ -107,6 +109,7 @@ class TallyMappingsTable(QWidget):
         return {
             "mapping_type": str(row.get("mapping_type") or ""),
             "source_value": str(row.get("source_value") or ""),
+            "company_name": str(row.get("company_name") or ""),
             "tally_value": str(row.get("tally_value") or "").strip(),
             "is_active": str(row.get("is_active") or "Y"),
         }

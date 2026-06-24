@@ -106,6 +106,10 @@ can refresh Tally ledgers and stock groups into editable dropdowns, so users can
 select existing masters or type names that should be created later. Refreshing
 ledger/group choices does not clear mapping fields: existing SQL values are
 preserved, and companies without saved mappings fall back to `.env`/config defaults.
+Invoice review may show dynamic mappings such as vendor ledger, stock item, and
+unit. Those review rows are saved against the company that was active when the
+rows were displayed, so changing the top-bar company before `Submit Corrections`
+does not redirect those mapping saves to another Tally company.
 Before any direct Tally sync/post, InvoiceAI verifies that the selected company
 is returned by the running TallyPrime instance. If the company is blank, typed
 wrongly, or not open/loaded in TallyPrime, export is blocked before masters or

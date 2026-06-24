@@ -52,6 +52,7 @@
   the app relies on the configured ledger names as the stable mapping contract.
 - Customer-editable Tally connection values live in runtime `settings.json`; Tally URL, timeout, and selected company are global. Confirmed ledger/group/item/unit mappings live in SQLite `tally_master_mapping` rows keyed by company, mapping type, and source value.
 - Settings should prefer Tally-provided dropdown choices for ledger mappings and Stock groups while remaining editable for intentional master creation. Similarity-ranked suggestions are allowed for invoice-review dynamic mappings, but SQL confirmed mappings remain the posting source of truth.
+- Invoice-review dynamic mapping rows must carry their generated company context. Correction saves must use that submitted company, not whichever company is selected globally at save time.
 - Refreshing Tally ledger/group dropdowns must not clear mapping fields; preserve
   saved/current values and fall back to `.env`/config defaults for new companies.
 - `DEFAULT_STOCK_GROUP` backs the customer-editable `Stock Group` field because item-wise posting may
