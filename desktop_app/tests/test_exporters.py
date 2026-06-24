@@ -6,7 +6,7 @@ import json
 import unittest
 
 from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail
-from desktop_app.services.exports.exporters import build_erpnext_purchase_invoice_payload, export_invoice_json, export_invoice_tally
+from desktop_app.services.exports.exporters import export_invoice_json, export_invoice_tally
 
 
 class ExporterTests(unittest.TestCase):
@@ -56,17 +56,6 @@ class ExporterTests(unittest.TestCase):
         self.assertIn("<LEDGERNAME>Purchase Account</LEDGERNAME>", xml)
         self.assertIn("<LEDGERNAME>Input CGST</LEDGERNAME>", xml)
         self.assertIn("<LEDGERNAME>Input SGST</LEDGERNAME>", xml)
-
-    def test_erpnext_payload_includes_purchase_taxes(self) -> None:
-        """ERPNext purchase payload should include item and GST tax rows."""
-        payload = build_erpnext_purchase_invoice_payload(self.sample_purchase_invoice())
-        self.assertEqual(payload["doctype"], "Purchase Invoice")
-        self.assertEqual(payload["supplier"], "Vendor Pvt Ltd")
-        self.assertEqual(payload["items"][0]["expense_account"], "Purchase Account")
-        self.assertEqual(payload["items"][0]["gst_hsn_code"], "9983")
-        self.assertEqual(len(payload["taxes"]), 2)
-        self.assertEqual(payload["taxes"][0]["account_head"], "Input CGST")
-        self.assertEqual(payload["taxes"][0]["tax_amount"], 90)
 
     def test_json_export_keeps_previous_line_item_shape(self) -> None:
         """JSON file export should not expose the TallyPrime-only item_name field."""

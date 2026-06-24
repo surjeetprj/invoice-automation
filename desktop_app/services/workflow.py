@@ -31,7 +31,7 @@ from ..domain.schemas import (
 )
 from .documents.document_source import DocumentKind, classify_document, validate_upload_file
 from .documents.extraction import ScannedDocumentException
-from .exports.exporters import export_invoice_csv, export_invoice_json, export_invoice_tally, export_to_erpnext
+from .exports.exporters import export_invoice_json, export_invoice_tally
 from .parsing.ai_client import AIRateLimitError
 from .parsing.ai_parser import extract_invoice_source_text, parse_invoice, parse_invoice_file
 from .settings import build_tally_settings, get_tally_settings, get_tally_settings_payload, save_tally_settings
@@ -313,20 +313,10 @@ class DesktopWorkflow:
             data = invoice_data_from_invoice(invoice)
             if data is None:
                 raise ValueError("No extracted invoice data is available for export.")
-            if fmt == "csv":
-                content, filename = export_invoice_csv(invoice_id, data)
-            elif fmt == "json":
+            if fmt == "json":
                 content, filename = export_invoice_json(invoice_id, data)
             elif fmt == "tally":
                 content, filename = export_invoice_tally(invoice_id, data)
-            elif fmt == "erpnext":
-                result = export_to_erpnext(data)
-                if not result.get("success"):
-                    raise ValueError(result.get("error", "ERPNext export failed"))
-                invoice.status = InvoiceStatus.POSTED
-                db.commit()
-                self.log(db, invoice.id, f"Pushed to ERPNext (Ref: {result.get('erp_reference')}) - status set to Posted")
-                return result, None
             else:
                 raise ValueError(f"Unsupported export format: {fmt}")
             return content, filename

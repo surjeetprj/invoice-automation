@@ -28,8 +28,8 @@
   missing export-critical values are visible before posting to an ERP.
 - Required field markers in the review UI are informational in this version;
   they surface export risk but do not block approval by themselves.
-- Direct TallyPrime posting belongs in `services/tally`; downloadable CSV,
-  JSON, Tally XML, and ERPNext exports remain in `services/exports`.
+- Direct TallyPrime posting belongs in `services/tally`; downloadable JSON
+  and Tally XML exports remain in `services/exports`.
 - Direct TallyPrime posting uses controlled master creation after reviewer
   confirmation, not blind auto-creation.
 - TallyPrime direct posting has two explicit modes: ledger-only accounting
@@ -57,7 +57,7 @@
 - `DEFAULT_STOCK_GROUP` backs the customer-editable `Stock Group` field because item-wise posting may
   need customer-specific inventory grouping; other Tally master-type constants
   remain internal code constants.
-- For scanned/image invoices, ERP-safe totals are preferred over unreliable
+- For scanned/image invoices, export-safe totals are preferred over unreliable
   item-level detail.
 - Failed AI parsing should still leave an invoice available for pending review.
 - Gemini quota or rate-limit failures should not crash processing; the invoice

@@ -48,12 +48,10 @@ LINE_COLUMNS = [
 ]
 
 EXPORT_ACTIONS = [
-    ("csv", "✕ CSV"),
     ("json", "✕ JSON"),
     ("tally", "✕ Tally XML"),
     ("tally_post", "Post Purchase Voucher to TallyPrime"),
     ("tally_post_items", "Post Item-wise Purchase Voucher to TallyPrime"),
     ("tally_vendor", "Sync Vendor Ledger to TallyPrime"),
     ("tally_ledgers", "Sync Purchase and GST Ledgers to TallyPrime"),
-    ("erpnext", "✕ ERPNext"),
 ]

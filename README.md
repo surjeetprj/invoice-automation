@@ -84,7 +84,7 @@ Final approval always requires a separate click on `Approve`.
 
 The Export Data menu supports file-based exports and direct TallyPrime posting:
 
-- `CSV`, `JSON`, `Tally XML`, and `ERPNext` create downloadable export files.
+- `JSON` and `Tally XML` create downloadable export files.
 - `Post Purchase Voucher to TallyPrime` posts a ledger-only accounting Purchase
   voucher to the local TallyPrime HTTP server.
 - `Post Item-wise Purchase Voucher to TallyPrime` posts an inventory Purchase

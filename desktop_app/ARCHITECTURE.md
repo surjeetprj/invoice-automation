@@ -51,8 +51,7 @@ invoice remains available for review.
 - `db/models.py`: normalized SQLAlchemy tables.
 - `db/repository.py`: conversion between ORM rows and Pydantic models.
 - `db/migrations.py`: safe startup migration for legacy JSON-based SQLite DBs.
-- `services/exports/exporters.py`: CSV, JSON, downloadable Tally XML, and
-  ERPNext purchase exports.
+- `services/exports/exporters.py`: downloadable JSON and Tally XML exports.
 - `services/settings.py`: runtime-editable Tally defaults stored in app-data JSON.
 - `services/tally/`: local TallyPrime HTTP/XML client, controlled master XML,
   ledger-only and item-wise purchase voucher XML, inventory master XML, response
@@ -74,10 +73,10 @@ repo in the configured app-data directory.
 ## Export Model
 
 Exports are purchase-voucher oriented. Tally XML uses Purchase voucher
-semantics and input tax ledgers. ERPNext export creates a Purchase Invoice
-payload with supplier, item rows, and GST tax rows.
+semantics and input tax ledgers. JSON export keeps reviewed invoice data available
+for offline inspection or integration outside the app.
 
-Downloadable exports stay in `services/exports`. Direct posting to a locally
+Downloadable JSON and Tally XML exports stay in `services/exports`. Direct posting to a locally
 running TallyPrime instance is handled by `services/tally` and orchestrated by
 `DesktopWorkflow`. Customer-editable Tally settings are stored in runtime
 `settings.json` as global connection settings only. Confirmed Tally master mappings
@@ -122,7 +121,7 @@ than silently downgrading to ledger-only posting.
 
 For scanned/image invoices, reliable invoice totals are preferred over
 unreliable visual line-item detail. If visual line rows do not reconcile with
-invoice totals, normalization creates one ERP-safe summary purchase line.
+invoice totals, normalization creates one export-safe summary purchase line.
 
 ## Review Corrections
 

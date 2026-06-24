@@ -337,7 +337,7 @@ class MainWindow(SettingsActionsMixin, TallyActionsMixin, QMainWindow):
         self.run_task(self.workflow.reprocess_invoice, lambda _result: self.open_invoice(invoice_id), invoice_id)
 
     def export_invoice(self, invoice_id: int, fmt: str) -> None:
-        """Export approved invoice data locally or push it to ERPNext."""
+        """Export approved invoice data locally or through direct TallyPrime actions."""
         if fmt == "tally_post":
             self.post_invoice_to_tally(invoice_id)
             return
@@ -349,12 +349,6 @@ class MainWindow(SettingsActionsMixin, TallyActionsMixin, QMainWindow):
             return
         if fmt == "tally_ledgers":
             self.sync_tally_system_ledgers(invoice_id)
-            return
-        if fmt == "erpnext":
-            self.run_task(
-                lambda: self.workflow.export_invoice(invoice_id, fmt),
-                lambda _result: QMessageBox.information(self, "ERPNext", "Invoice pushed to ERPNext."),
-            )
             return
         ext = "xml" if fmt == "tally" else fmt
         path, _ = QFileDialog.getSaveFileName(self, "Save Export", f"invoice_{invoice_id}.{ext}")

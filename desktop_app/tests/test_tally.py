@@ -800,11 +800,21 @@ class TallyServiceTests(unittest.TestCase):
         workflow = DesktopWorkflow()
         workflow._initialized = True
         with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
-            for fmt in ("csv", "json", "tally"):
+            for fmt in ("json", "tally"):
                 content, filename = workflow.export_invoice(invoice_id, fmt)
                 self.assertIsNotNone(filename)
                 self.assertTrue(content)
 
+    def test_removed_file_exports_are_unsupported(self) -> None:
+        """CSV and ERPNext export routes should stay removed from the workflow."""
+        engine = self.make_engine()
+        invoice_id = self.create_invoice(engine)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            for fmt in ("csv", "erpnext"):
+                with self.assertRaisesRegex(ValueError, f"Unsupported export format: {fmt}"):
+                    workflow.export_invoice(invoice_id, fmt)
 
     def test_workflow_rejects_unapproved_invoice_for_tally_posting(self) -> None:
         """Only approved or already posted invoices can be posted to Tally."""
