@@ -46,6 +46,38 @@ def parse_master_names(xml_text: str) -> set[str]:
     return names
 
 
+def parse_master_details(xml_text: str) -> list[dict[str, str]]:
+    """Parse master objects with their name and parent from a Tally collection XML."""
+    import re
+    # Sanitize invalid XML control characters or references
+    xml_text = re.sub(r'&#\d+;', '', xml_text)
+    xml_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', xml_text)
+    try:
+        root = ElementTree.fromstring(xml_text.strip())
+    except ElementTree.ParseError:
+        return []
+
+    results: list[dict[str, str]] = []
+    collection = root.find(".//COLLECTION")
+    if collection is not None:
+        for child in collection:
+            name = child.attrib.get("NAME") or child.attrib.get("Name") or ""
+            if not name:
+                name_node = child.find("NAME") or child.find("Name")
+                if name_node is not None and name_node.text:
+                    name = name_node.text.strip()
+            parent = ""
+            parent_node = child.find("PARENT") or child.find("Parent")
+            if parent_node is not None and parent_node.text:
+                parent = parent_node.text.strip()
+            if name:
+                results.append({
+                    "name": name,
+                    "parent": parent
+                })
+    return results
+
+
 def normalize_name(value: str) -> str:
     """Normalize a Tally master name for case-insensitive matching."""
     return " ".join(value.strip().lower().split())

@@ -78,15 +78,11 @@ class SettingsActionsMixin:
             company = dialog.selected_company()
 
             def loaded(result: dict[str, Any]) -> None:
-                dialog.set_ledgers([str(ledger) for ledger in result.get("ledgers", [])])
-                dialog.set_stock_groups([str(group) for group in result.get("stock_groups", [])])
+                dialog.set_options(result)
                 QMessageBox.information(dialog, "TallyPrime", "Loaded ledger and stock group choices.")
 
             def load_options() -> dict[str, Any]:
-                return {
-                    "ledgers": self.workflow.list_tally_ledgers(company),
-                    "stock_groups": self.workflow.list_tally_stock_groups(company),
-                }
+                return self.workflow.list_tally_options(company)
 
             self.run_task(load_options, loaded, on_error=lambda err: QMessageBox.warning(dialog, "TallyPrime", err))
 

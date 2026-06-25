@@ -224,6 +224,8 @@ def build_collection_export_xml(collection_name: str, master_type: str, company:
     add_text(collection, "FETCH", "NAME")
     if master_type == "Unit":
         add_text(collection, "FETCH", "FORMALNAME")
+    if master_type in {"Ledger", "Group"}:
+        add_text(collection, "FETCH", "PARENT")
     indent(envelope, space="  ")
     return tostring(envelope, encoding="utf-8", xml_declaration=True)
 

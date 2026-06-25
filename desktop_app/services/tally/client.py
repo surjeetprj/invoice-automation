@@ -31,6 +31,7 @@ from .preflight import (
     normalize_name,
     normalized_names,
     parse_master_names,
+    parse_master_details,
     prioritize_inventory_masters,
     validate_inventory_item_posting,
 )
@@ -97,6 +98,12 @@ class TallyClient:
         xml = build_collection_export_xml(collection_name, master_type, company=company)
         raw = self.post_xml(xml)
         return parse_master_names(raw)
+
+    def fetch_master_details(self, collection_name: str, master_type: str, company: str | None = None) -> list[dict[str, str]]:
+        """Fetch master names along with their parent group names from TallyPrime."""
+        xml = build_collection_export_xml(collection_name, master_type, company=company)
+        raw = self.post_xml(xml)
+        return parse_master_details(raw)
 
     def preflight_purchase_invoice(self, data: InvoiceData) -> TallyPreflight:
         """Check which required purchase masters are missing in TallyPrime."""

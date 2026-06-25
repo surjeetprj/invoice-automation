@@ -170,6 +170,20 @@ class SettingsDialog(QDialog):
         """Populate the default stock group combo box."""
         self.set_combo_values(self.default_stock_group, stock_groups)
 
+    def set_options(self, options: dict[str, Any]) -> None:
+        """Populate mapping choices filtered by category from TallyPrime."""
+        groups = options.get("groups") or []
+        purchase_ledgers = options.get("purchase_ledgers") or []
+        duty_ledgers = options.get("duty_ledgers") or []
+        stock_groups = options.get("stock_groups") or []
+        
+        self.set_combo_values(self.vendor_parent, groups)
+        self.set_combo_values(self.default_stock_group, stock_groups)
+        self.set_combo_values(self.purchase_ledger, purchase_ledgers)
+        
+        for combo in (self.input_cgst, self.input_sgst, self.input_igst, self.input_cess):
+            self.set_combo_values(combo, duty_ledgers)
+
     def set_serial_number(self, serial_number: str) -> None:
         """Display the detected Tally serial number without persisting it."""
         self.serial_number.setText(serial_number)

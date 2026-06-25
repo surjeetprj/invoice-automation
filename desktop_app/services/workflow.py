@@ -118,6 +118,59 @@ class DesktopWorkflow:
         logger.info("Listing TallyPrime stock groups for company: %s", selected_company or "<default>")
         return sorted(TallyClient().fetch_master_names("InvoiceAISettingsStockGroups", "Stock Group", company=selected_company), key=str.casefold)
 
+    def list_tally_options(self, company: str | None = None) -> dict[str, Any]:
+        """Return categorized and filtered TallyPrime choices for settings dropdowns."""
+        self.initialize()
+        selected_company = (company or get_tally_settings().tally_company or "").strip()
+        logger.info("Listing TallyPrime options for company: %s", selected_company or "<default>")
+        
+        client = TallyClient()
+        raw_groups = client.fetch_master_details("InvoiceAISettingsGroups", "Group", company=selected_company)
+        raw_ledgers = client.fetch_master_details("InvoiceAISettingsLedgersWithParent", "Ledger", company=selected_company)
+        stock_groups = sorted(client.fetch_master_names("InvoiceAISettingsStockGroups", "Stock Group", company=selected_company), key=str.casefold)
+        
+        parent_map = {g["name"]: g["parent"] for g in raw_groups}
+        
+        def is_descendant(current_group: str, target_parent: str) -> bool:
+            visited = set()
+            while current_group:
+                if current_group.lower().strip() == target_parent.lower().strip():
+                    return True
+                if current_group in visited:
+                    break
+                visited.add(current_group)
+                current_group = parent_map.get(current_group, "")
+            return False
+            
+        filtered_groups = [
+            g["name"] for g in raw_groups 
+            if is_descendant(g["name"], "Sundry Creditors")
+        ]
+        
+        purchase_ledgers = [
+            l["name"] for l in raw_ledgers 
+            if is_descendant(l["parent"], "Purchase Accounts")
+        ]
+        
+        duty_ledgers = [
+            l["name"] for l in raw_ledgers 
+            if is_descendant(l["parent"], "Duties & Taxes")
+        ]
+        
+        if not filtered_groups:
+            filtered_groups = [g["name"] for g in raw_groups]
+        if not purchase_ledgers:
+            purchase_ledgers = [l["name"] for l in raw_ledgers]
+        if not duty_ledgers:
+            duty_ledgers = [l["name"] for l in raw_ledgers]
+            
+        return {
+            "groups": sorted(list(set(filtered_groups)), key=str.casefold),
+            "purchase_ledgers": sorted(list(set(purchase_ledgers)), key=str.casefold),
+            "duty_ledgers": sorted(list(set(duty_ledgers)), key=str.casefold),
+            "stock_groups": stock_groups,
+        }
+
     def test_tally_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Test TallyPrime reachability and serial detection for unsaved settings."""
         self.initialize()

@@ -501,6 +501,38 @@ class TallyServiceTests(unittest.TestCase):
         client.fetch_master_names.assert_any_call("InvoiceAISettingsLedgers", "Ledger", company="SRC Pvt Ltd")
         client.fetch_master_names.assert_any_call("InvoiceAISettingsStockGroups", "Stock Group", company="SRC Pvt Ltd")
 
+    def test_workflow_lists_tally_options(self) -> None:
+        """list_tally_options should query groups and ledgers and filter/categorize them by parent group."""
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.TallyClient") as client_cls:
+            client = client_cls.return_value
+            client.fetch_master_details.side_effect = [
+                # Groups
+                [
+                    {"name": "Sundry Creditors", "parent": "Current Liabilities"},
+                    {"name": "Local Creditors", "parent": "Sundry Creditors"},
+                    {"name": "Duties & Taxes", "parent": "Current Liabilities"},
+                    {"name": "Purchase Accounts", "parent": "Primary"},
+                ],
+                # Ledgers
+                [
+                    {"name": "Supplier A", "parent": "Local Creditors"},
+                    {"name": "Supplier B", "parent": "Sundry Creditors"},
+                    {"name": "Purchase Account", "parent": "Purchase Accounts"},
+                    {"name": "Input CGST", "parent": "Duties & Taxes"},
+                    {"name": "Cash", "parent": "Cash-in-Hand"},
+                ]
+            ]
+            client.fetch_master_names.return_value = {"Primary", "Services"}
+            
+            options = workflow.list_tally_options("SRC Pvt Ltd")
+            
+            self.assertEqual(options["groups"], ["Local Creditors", "Sundry Creditors"])
+            self.assertEqual(options["purchase_ledgers"], ["Purchase Account"])
+            self.assertEqual(options["duty_ledgers"], ["Input CGST"])
+            self.assertEqual(options["stock_groups"], ["Primary", "Services"])
+
     def test_workflow_posts_approved_invoice_and_marks_posted(self) -> None:
         """Successful Tally posting should mark the invoice Posted and audit it."""
         engine = self.make_engine()
