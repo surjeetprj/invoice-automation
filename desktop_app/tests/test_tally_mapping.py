@@ -34,7 +34,7 @@ from desktop_app.services.tally.mapping import (
     settings_mapping_from_db,
     tally_mapping_context,
 )
-from desktop_app.services.tally.masters import required_inventory_purchase_masters
+from desktop_app.services.tally.masters import build_master_import_xml, required_inventory_purchase_masters
 from desktop_app.services.tally.vouchers import build_inventory_purchase_voucher_xml, build_purchase_voucher_xml
 from desktop_app.services.workflow import DesktopWorkflow
 from desktop_app.services.workflow_review import mapping_company_name
@@ -191,6 +191,24 @@ class TallyMasterMappingTests(unittest.TestCase):
         self.assertIn("<STOCKITEMNAME>Saral IncomeTax Local</STOCKITEMNAME>", item_xml)
         self.assertIn("<ACTUALQTY>1 Pcs</ACTUALQTY>", item_xml)
         self.assertIn("Unit Master: Pcs", [master.label for master in masters])
+
+    def test_unit_mapping_matches_normalized_source_and_preserves_tally_value(self) -> None:
+        """Unit mappings should apply after normalization without changing Tally's unit text."""
+        invoice = self.sample_invoice()
+        invoice.line_items[0].unit = "Year"
+        with self.make_db() as db:
+            save_mapping(db, "ABC Enterprises", UNIT, "Year", "yr")
+            rows = context_rows_for_invoice(db, invoice, "ABC Enterprises")
+        with tally_mapping_context(rows):
+            item_xml = build_inventory_purchase_voucher_xml(1, invoice).decode("utf-8")
+            masters = required_inventory_purchase_masters(invoice)
+            master_xml = build_master_import_xml(masters).decode("utf-8")
+        self.assertIn("Unit Master: yr", [master.label for master in masters])
+        self.assertIn("<BASEUNITS>yr</BASEUNITS>", master_xml)
+        self.assertIn("<ACTUALQTY>1 yr</ACTUALQTY>", item_xml)
+        self.assertIn("<BILLEDQTY>1 yr</BILLEDQTY>", item_xml)
+        self.assertIn("<RATE>1000.00/yr</RATE>", item_xml)
+        self.assertNotIn("<BASEUNITS>YEAR</BASEUNITS>", master_xml)
 
     def test_review_mapping_save_uses_payload_company_after_settings_switch(self) -> None:
         """Submitting review mappings should save under the company used to build the row."""

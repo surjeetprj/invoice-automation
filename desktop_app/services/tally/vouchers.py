@@ -390,8 +390,10 @@ def tally_unit_text(unit: str | None) -> str:
     normalized = normalize_unit_name(unit) or ""
     if not normalized:
         return ""
-    mapped = mapped_value(MAP_UNIT, normalized, normalized)
-    return mapped.title() if mapped else ""
+    mapped = mapped_value(MAP_UNIT, normalized, "")
+    if mapped:
+        return mapped
+    return normalized.title()
 
 
 def item_supply_type(item) -> str:

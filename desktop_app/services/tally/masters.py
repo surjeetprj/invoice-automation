@@ -121,16 +121,16 @@ def vendor_master_from_invoice(data: InvoiceData, *, action: str = "Alter") -> T
 
 def unit_master_from_line_item(unit: str | None, *, action: str = "Create") -> TallyMaster | None:
     """Build a simple unit master from reviewed line-item text."""
-    normalized = normalize_unit_name(unit)
-    if not normalized:
+    unit_name = mapped_unit_name(unit)
+    if not unit_name:
         return None
-    return TallyMaster(mapped_value(MAP_UNIT, normalized, normalized), UNIT_MASTER, action=action)
+    return TallyMaster(unit_name, UNIT_MASTER, action=action)
 
 
 def stock_item_master_from_invoice_item(item: LineItem, data: InvoiceData, *, action: str = "Create") -> TallyMaster:
     """Build a stock item master from one reviewed invoice line item."""
     stock_name = stock_item_name_from_line_item(item)
-    unit_name = normalize_unit_name(item.unit)
+    unit_name = mapped_unit_name(item.unit)
     return TallyMaster(
         stock_name,
         STOCK_ITEM_MASTER,
@@ -575,6 +575,14 @@ def normalize_unit_name(unit: str | None) -> str | None:
         return None
     cleaned = " ".join(unit.strip().upper().split())
     return cleaned or None
+
+
+def mapped_unit_name(unit: str | None) -> str | None:
+    """Return the confirmed Tally unit value, falling back to normalized invoice text."""
+    normalized = normalize_unit_name(unit)
+    if not normalized:
+        return None
+    return mapped_value(MAP_UNIT, normalized, normalized)
 
 
 def gst_reporting_uqc(unit_name: str) -> str:

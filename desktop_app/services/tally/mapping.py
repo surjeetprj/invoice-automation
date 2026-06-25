@@ -60,7 +60,7 @@ def mapping_type(value: Any) -> str:
 
 def mapping_key(type_value: Any, source_value: Any) -> tuple[str, str]:
     """Return the in-memory context key for one mapping."""
-    return (mapping_type(type_value), normalize_text(source_value))
+    return (mapping_type(type_value), normalize_text(source_value).casefold())
 
 
 def default_company_mapping() -> dict[str, str]:
