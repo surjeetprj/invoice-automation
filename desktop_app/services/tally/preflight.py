@@ -63,11 +63,15 @@ def parse_master_details(xml_text: str) -> list[dict[str, str]]:
         for child in collection:
             name = child.attrib.get("NAME") or child.attrib.get("Name") or ""
             if not name:
-                name_node = child.find("NAME") or child.find("Name")
+                name_node = child.find("NAME")
+                if name_node is None:
+                    name_node = child.find("Name")
                 if name_node is not None and name_node.text:
                     name = name_node.text.strip()
             parent = ""
-            parent_node = child.find("PARENT") or child.find("Parent")
+            parent_node = child.find("PARENT")
+            if parent_node is None:
+                parent_node = child.find("Parent")
             if parent_node is not None and parent_node.text:
                 parent = parent_node.text.strip()
             if name:
