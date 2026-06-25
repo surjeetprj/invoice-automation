@@ -2,8 +2,6 @@ from __future__ import annotations
 
 """Regression tests for desktop parsing and validation helpers."""
 
-import sys
-import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -251,74 +249,33 @@ class DomainHelperTests(unittest.TestCase):
         self.assertEqual(fake_client.models.generate_content.call_args.kwargs["model"], "test-visual-model")
 
     def test_text_ai_client_uses_configured_gemini_model(self) -> None:
-        """The text Gemini client should pass the configured model into LangChain."""
+        """The text Gemini client should pass the configured model into google-genai."""
         from desktop_app.services.parsing.ai_client import invoke_invoice_parser
 
-        class FakeResult:
-            def model_dump(self) -> dict[str, str]:
-                return {"invoice_number": "TXT-1"}
-
-        class FakeStructuredLLM:
-            def invoke(self, messages):
-                return FakeResult()
-
-        fake_llm = Mock()
-        fake_llm.with_structured_output.return_value = FakeStructuredLLM()
-        fake_chat = Mock(return_value=fake_llm)
-        fake_langchain_core = types.ModuleType("langchain_core")
-        fake_messages = types.ModuleType("langchain_core.messages")
-        fake_messages.HumanMessage = lambda content: ("human", content)
-        fake_messages.SystemMessage = lambda content: ("system", content)
-        fake_google_genai = types.ModuleType("langchain_google_genai")
-        fake_google_genai.ChatGoogleGenerativeAI = fake_chat
+        fake_client = Mock()
+        fake_client.models.generate_content.return_value = Mock(parsed=InvoiceData(invoice_number="TXT-1"))
 
         with (
             patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
             patch("desktop_app.services.parsing.ai_client.GEMINI_MODEL", "test-text-model"),
-            patch.dict(
-                sys.modules,
-                {
-                    "langchain_core": fake_langchain_core,
-                    "langchain_core.messages": fake_messages,
-                    "langchain_google_genai": fake_google_genai,
-                },
-            ),
+            patch("google.genai.Client", return_value=fake_client),
         ):
             result = invoke_invoice_parser("raw invoice text", "invoice.pdf")
 
         self.assertEqual(result["invoice_number"], "TXT-1")
-        fake_chat.assert_called_once_with(
-            model="test-text-model",
-            google_api_key="test-key",
-            temperature=0.0,
-            retries=0,
-        )
+        fake_client.models.generate_content.assert_called_once()
+        self.assertEqual(fake_client.models.generate_content.call_args.kwargs["model"], "test-text-model")
 
     def test_text_ai_client_raises_clean_rate_limit_error(self) -> None:
         """Gemini quota errors should become concise application exceptions."""
         from desktop_app.services.parsing.ai_client import AIRateLimitError, invoke_invoice_parser
 
-        class FakeStructuredLLM:
-            def invoke(self, messages):
-                raise RuntimeError("429 quota exceeded. Please retry in 36.5s.")
-
-        fake_llm = Mock()
-        fake_llm.with_structured_output.return_value = FakeStructuredLLM()
-        fake_google_genai = types.ModuleType("langchain_google_genai")
-        fake_google_genai.ChatGoogleGenerativeAI = Mock(return_value=fake_llm)
-        fake_messages = types.ModuleType("langchain_core.messages")
-        fake_messages.HumanMessage = lambda content: ("human", content)
-        fake_messages.SystemMessage = lambda content: ("system", content)
+        fake_client = Mock()
+        fake_client.models.generate_content.side_effect = RuntimeError("429 quota exceeded. Please retry in 36.5s.")
 
         with (
             patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
-            patch.dict(
-                sys.modules,
-                {
-                    "langchain_core.messages": fake_messages,
-                    "langchain_google_genai": fake_google_genai,
-                },
-            ),
+            patch("google.genai.Client", return_value=fake_client),
         ):
             with self.assertRaises(AIRateLimitError) as context:
                 invoke_invoice_parser("raw invoice text", "invoice.pdf")

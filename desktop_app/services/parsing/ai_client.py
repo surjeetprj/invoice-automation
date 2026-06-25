@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Gemini structured-output clients for text and visual invoice parsing."""
+"""Gemini JSON-schema clients for text and visual invoice parsing."""
 
 import logging
 import re
@@ -23,26 +23,12 @@ class AIRateLimitError(AIClientError):
 
 
 def invoke_invoice_parser(raw_markdown: str, vendor_hint: str | None = None) -> dict[str, Any]:
-    """Call Gemini once and return a raw InvoiceData-shaped dictionary."""
+    """Parse extracted digital-PDF text through Gemini's direct JSON-schema API."""
     if not GOOGLE_API_KEY:
         raise RuntimeError("GOOGLE_API_KEY is not configured. AI parsing cannot run.")
 
     try:
-        from langchain_core.messages import HumanMessage, SystemMessage
-        from langchain_google_genai import ChatGoogleGenerativeAI
-
-        llm = ChatGoogleGenerativeAI(
-            model=GEMINI_MODEL,
-            google_api_key=GOOGLE_API_KEY,
-            temperature=0.0,
-            retries=0,
-        )
-        structured_llm = llm.with_structured_output(InvoiceData)
-        result = structured_llm.invoke([
-            SystemMessage(content=SYSTEM_PROMPT),
-            HumanMessage(content=f"Invoice text:\n\n{raw_markdown}\n\nVendor hint: {vendor_hint or 'Unknown'}"),
-        ])
-        return result.model_dump()
+        return invoke_invoice_text_json_parser(raw_markdown, vendor_hint)
     except Exception as exc:
         if is_rate_limit_error(exc):
             message = clean_ai_error_message(exc, prefix="Gemini quota or rate limit reached")
@@ -50,6 +36,30 @@ def invoke_invoice_parser(raw_markdown: str, vendor_hint: str | None = None) -> 
             raise AIRateLimitError(message) from exc
         logger.exception("AI parsing failed: %s", exc)
         raise AIClientError(f"AI parsing failed: {exc}") from exc
+
+
+def invoke_invoice_text_json_parser(raw_markdown: str, vendor_hint: str | None = None) -> dict[str, Any]:
+    """Call Gemini's direct JSON-schema API for extracted digital-PDF text."""
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=GOOGLE_API_KEY)
+    prompt = (
+        f"{SYSTEM_PROMPT}\n\n"
+        f"Vendor hint from filename: {vendor_hint or 'Unknown'}\n\n"
+        f"Invoice text:\n\n{raw_markdown}\n\n"
+        "Return only schema-valid JSON."
+    )
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=[types.Part.from_text(text=prompt)],
+        config=types.GenerateContentConfig(
+            temperature=0.0,
+            response_mime_type="application/json",
+            response_schema=InvoiceData,
+        ),
+    )
+    return invoice_response_to_dict(response)
 
 
 def invoke_invoice_file_parser(file_path: str | Path, mime_type: str, vendor_hint: str | None = None) -> dict[str, Any]:
@@ -80,13 +90,7 @@ def invoke_invoice_file_parser(file_path: str | Path, mime_type: str, vendor_hin
                 response_schema=InvoiceData,
             ),
         )
-        parsed = getattr(response, "parsed", None)
-        if isinstance(parsed, InvoiceData):
-            return parsed.model_dump()
-        if parsed is not None and hasattr(parsed, "model_dump"):
-            return parsed.model_dump()
-        text = getattr(response, "text", "") or ""
-        return InvoiceData.model_validate_json(text).model_dump()
+        return invoice_response_to_dict(response)
     except Exception as exc:
         if is_rate_limit_error(exc):
             message = clean_ai_error_message(exc, prefix="Gemini quota or rate limit reached")
@@ -94,6 +98,28 @@ def invoke_invoice_file_parser(file_path: str | Path, mime_type: str, vendor_hin
             raise AIRateLimitError(message) from exc
         logger.exception("Visual AI parsing failed for %s: %s", path, exc)
         raise AIClientError(f"Visual AI parsing failed: {exc}") from exc
+
+
+def invoice_response_to_dict(response: Any) -> dict[str, Any]:
+    """Convert a direct Gemini response into an InvoiceData dictionary."""
+    parsed = getattr(response, "parsed", None)
+    if parsed is not None:
+        return invoice_result_to_dict(parsed)
+    text = getattr(response, "text", "") or ""
+    if not text.strip():
+        raise ValueError("Gemini returned no structured invoice data")
+    return InvoiceData.model_validate_json(text).model_dump()
+
+
+def invoice_result_to_dict(result: Any) -> dict[str, Any]:
+    """Convert a structured parser result into an InvoiceData dictionary."""
+    if isinstance(result, InvoiceData):
+        return result.model_dump()
+    if isinstance(result, dict):
+        return InvoiceData.model_validate(result).model_dump()
+    if hasattr(result, "model_dump"):
+        return result.model_dump()
+    raise ValueError("Gemini returned no structured invoice data")
 
 
 def is_rate_limit_error(exc: BaseException) -> bool:
