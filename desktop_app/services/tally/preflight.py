@@ -31,6 +31,10 @@ class TallyPreflight:
 
 def parse_master_names(xml_text: str) -> set[str]:
     """Parse master names returned by a Tally collection export."""
+    import re
+    # Sanitize invalid XML control characters or references
+    xml_text = re.sub(r'&#\d+;', '', xml_text)
+    xml_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', xml_text)
     try:
         root = ElementTree.fromstring(xml_text.strip())
     except ElementTree.ParseError:
