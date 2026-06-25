@@ -206,12 +206,15 @@ def tax_ledger_masters(*, action: str = "Alter") -> list[TallyMaster]:
 
 def build_collection_export_xml(collection_name: str, master_type: str, company: str | None = None) -> bytes:
     """Build a Tally collection export request used for preflight existence checks."""
+    import uuid
+    # Append a unique suffix to collection name to bypass TallyPrime's collection/TDL caching
+    unique_name = f"{collection_name}_{uuid.uuid4().hex[:12]}"
     envelope = Element("ENVELOPE")
     header = SubElement(envelope, "HEADER")
     add_text(header, "VERSION", "1")
     add_text(header, "TALLYREQUEST", "Export")
     add_text(header, "TYPE", "Collection")
-    add_text(header, "ID", collection_name)
+    add_text(header, "ID", unique_name)
     body = SubElement(envelope, "BODY")
     desc = SubElement(body, "DESC")
     static = SubElement(desc, "STATICVARIABLES")
@@ -219,7 +222,7 @@ def build_collection_export_xml(collection_name: str, master_type: str, company:
     add_text(static, "SVEXPORTFORMAT", "$$SysName:XML")
     tdl = SubElement(desc, "TDL")
     tdl_message = SubElement(tdl, "TDLMESSAGE")
-    collection = SubElement(tdl_message, "COLLECTION", NAME=collection_name, ISMODIFY="No")
+    collection = SubElement(tdl_message, "COLLECTION", NAME=unique_name, ISMODIFY="No")
     add_text(collection, "TYPE", master_type)
     add_text(collection, "FETCH", "NAME")
     if master_type == "Unit":

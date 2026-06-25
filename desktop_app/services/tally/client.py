@@ -180,19 +180,21 @@ class TallyClient:
 
 def build_tally_companies_xml() -> bytes:
     """Build a Tally collection export request for all company names."""
+    import uuid
+    unique_name = f"InvoiceAICompanies_{uuid.uuid4().hex[:12]}"
     envelope = Element("ENVELOPE")
     header = SubElement(envelope, "HEADER")
     SubElement(header, "VERSION").text = "1"
     SubElement(header, "TALLYREQUEST").text = "Export"
     SubElement(header, "TYPE").text = "Collection"
-    SubElement(header, "ID").text = "InvoiceAICompanies"
+    SubElement(header, "ID").text = unique_name
     body = SubElement(envelope, "BODY")
     desc = SubElement(body, "DESC")
     static = SubElement(desc, "STATICVARIABLES")
     SubElement(static, "SVEXPORTFORMAT").text = "$$SysName:XML"
     tdl = SubElement(desc, "TDL")
     message = SubElement(tdl, "TDLMESSAGE")
-    collection = SubElement(message, "COLLECTION", NAME="InvoiceAICompanies", ISMODIFY="No")
+    collection = SubElement(message, "COLLECTION", NAME=unique_name, ISMODIFY="No")
     SubElement(collection, "TYPE").text = "Company"
     SubElement(collection, "FETCH").text = "NAME"
     return tostring(envelope, encoding="utf-8", xml_declaration=True)
