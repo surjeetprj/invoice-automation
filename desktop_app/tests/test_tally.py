@@ -389,6 +389,8 @@ class TallyServiceTests(unittest.TestCase):
         <ENVELOPE><BODY><DATA>
           <LEDGER NAME="Vendor Pvt Ltd"><NAME>Vendor Pvt Ltd</NAME></LEDGER>
           <LEDGER><NAME>Purchase Account</NAME></LEDGER>
+          <UNIT NAME="YR"><NAME>YR</NAME><FORMALNAME>Year</FORMALNAME></UNIT>
+          <UNIT NAME="BOX"><NAME>BOX</NAME><MAILINGNAME>Box Name</MAILINGNAME></UNIT>
         </DATA></BODY></ENVELOPE>
         """
         from desktop_app.services.tally.client import parse_master_names
@@ -396,6 +398,22 @@ class TallyServiceTests(unittest.TestCase):
         names = parse_master_names(xml)
         self.assertIn("Vendor Pvt Ltd", names)
         self.assertIn("Purchase Account", names)
+        self.assertIn("YR", names)
+        self.assertIn("Year", names)
+        self.assertIn("BOX", names)
+        self.assertIn("Box Name", names)
+
+    def test_build_collection_export_xml_for_unit(self) -> None:
+        """Collection export XML for Unit master type should fetch both NAME and FORMALNAME."""
+        from desktop_app.services.tally.masters import build_collection_export_xml
+        xml = build_collection_export_xml("InvoiceAIUnits", "Unit").decode("utf-8")
+        self.assertIn("<FETCH>NAME</FETCH>", xml)
+        self.assertIn("<FETCH>FORMALNAME</FETCH>", xml)
+
+        # For non-Unit collections, it should not fetch FORMALNAME
+        xml_ledger = build_collection_export_xml("InvoiceAILedgers", "Ledger").decode("utf-8")
+        self.assertIn("<FETCH>NAME</FETCH>", xml_ledger)
+        self.assertNotIn("<FETCH>FORMALNAME</FETCH>", xml_ledger)
 
     def test_inventory_master_creation_is_one_by_one_before_stock_items(self) -> None:
         """Inventory prerequisites should be created one by one before dependent stock items."""

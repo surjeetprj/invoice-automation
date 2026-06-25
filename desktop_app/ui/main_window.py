@@ -313,8 +313,16 @@ class MainWindow(SettingsActionsMixin, TallyActionsMixin, QMainWindow):
         )
 
     def approve_invoice(self, invoice_id: int) -> None:
-        """Approve the current invoice without corrections."""
-        payload = {"decision": "approve", "reviewer": self.reviewer_name()}
+        """Approve the current invoice, persisting any current corrections and mappings."""
+        corrections = self.detail.build_corrections()
+        if corrections:
+            payload = {
+                "decision": "approve_with_corrections",
+                "reviewer": self.reviewer_name(),
+                "corrections": corrections,
+            }
+        else:
+            payload = {"decision": "approve", "reviewer": self.reviewer_name()}
         self.run_task(lambda: self.workflow.submit_review(invoice_id, payload), lambda _result: self.open_invoice(invoice_id))
 
     def submit_corrections(self, invoice_id: int, corrections: dict[str, Any]) -> None:

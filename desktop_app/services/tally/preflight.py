@@ -41,7 +41,7 @@ def parse_master_names(xml_text: str) -> set[str]:
         attr_name = element.attrib.get("NAME") or element.attrib.get("Name")
         if attr_name:
             names.add(attr_name.strip())
-        if tag in {"NAME", "LEDGERNAME", "VOUCHERTYPENAME"} and element.text and element.text.strip():
+        if tag in {"NAME", "LEDGERNAME", "VOUCHERTYPENAME", "FORMALNAME", "MAILINGNAME"} and element.text and element.text.strip():
             names.add(element.text.strip())
     return names
 

@@ -448,9 +448,10 @@ class DetailPage(QWidget):
         current = self.metadata.values()
         current["line_items"] = self.line_items.values()
         corrections = {key: value for key, value in current.items() if value != self.original_data.get(key)}
-        changed_mappings = self.tally_mappings.changed_values()
-        if changed_mappings:
-            corrections["tally_mappings"] = changed_mappings
+        # Always send all mapping values (both suggestions and manual changes) to ensure they are saved in SQL
+        mappings = self.tally_mappings.values()
+        if mappings:
+            corrections["tally_mappings"] = mappings
         return corrections
 
     def request_audit(self) -> None:

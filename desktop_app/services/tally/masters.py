@@ -222,6 +222,8 @@ def build_collection_export_xml(collection_name: str, master_type: str, company:
     collection = SubElement(tdl_message, "COLLECTION", NAME=collection_name, ISMODIFY="No")
     add_text(collection, "TYPE", master_type)
     add_text(collection, "FETCH", "NAME")
+    if master_type == "Unit":
+        add_text(collection, "FETCH", "FORMALNAME")
     indent(envelope, space="  ")
     return tostring(envelope, encoding="utf-8", xml_declaration=True)
 
