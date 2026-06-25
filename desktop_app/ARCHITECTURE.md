@@ -84,8 +84,14 @@ are stored in the normalized SQLite `tally_master_mapping` table. Settings-page
 values such as `Vender A/C Group`, `Stock Group`, Purchase Ledger, and input
 GST ledgers are stored as SQL `DEFAULT` mappings for the selected company.
 Invoice review shows dynamic mappings not already covered by Settings, such as
-vendor ledger, stock item, and unit. The Settings dialog can query TallyPrime
-for company, ledger, and stock group choices without requiring users to type
+Invoice review shows dynamic mappings not already covered by Settings, such as
+vendor ledger, stock item, and unit. Settings-page ledger/group dropdown choices
+are populated dynamically by querying TallyPrime master details (including the `PARENT` attribute)
+and recursively filtering descendant groups/ledgers (e.g. Vendor A/C Group shows only groups under
+"Sundry Creditors", GST Ledgers show only ledgers under "Duties & Taxes"). Any invalid XML control characters
+and character entities like `&#4;` are sanitized using regex before parsing. To prevent TallyPrime from
+caching collection schemas or data members, all dynamic collection queries append a unique randomized UUID suffix.
+The Settings dialog can query TallyPrime for company, ledger, and stock group choices without requiring users to type
 existing master names manually. Master refreshes populate dropdown choices only;
 they preserve the current mapping values and use `.env`/config defaults when a
 company has no saved SQL mapping yet. Review-page mapping rows include the
