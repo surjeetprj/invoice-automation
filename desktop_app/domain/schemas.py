@@ -55,6 +55,7 @@ class LineItem(BaseModel):
         default="",
         description=(
             "Visible product or service description for this row. "
+            "Preserve any multi-line formatting (using newlines) if the description spans multiple lines. "
             "Do not repeat the item name at the beginning of the description if it is redundant."
         ),
     )

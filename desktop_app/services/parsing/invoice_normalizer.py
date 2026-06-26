@@ -144,7 +144,15 @@ def extract_unit(description: str) -> str | None:
 
 def extract_item_name(description: str) -> str | None:
     """Extract a concise item/service name while preserving the full description elsewhere."""
-    text = " ".join(description.split())
+    if not description:
+        return None
+    # If the description has multiple lines, the first non-empty line is typically the item name header
+    lines = [line.strip() for line in description.splitlines() if line.strip()]
+    if not lines:
+        return None
+    first_line = lines[0]
+    
+    text = " ".join(first_line.split())
     if not text:
         return None
     metadata_pattern = (

@@ -885,6 +885,7 @@ class TallyServiceTests(unittest.TestCase):
         self.assertEqual(clean_item_description("Services", "Services"), "")
         self.assertEqual(clean_item_description("", "consulting"), "consulting")
         self.assertEqual(clean_item_description("Services", ""), "")
+        self.assertEqual(clean_item_description("Services", "Services - consulting\nline 2\nline 3"), "consulting\nline 2\nline 3")
 
     def test_inventory_purchase_voucher_includes_cleaned_description(self) -> None:
         """Item-wise voucher XML should include description tags for non-redundant details."""
