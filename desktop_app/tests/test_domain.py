@@ -345,7 +345,13 @@ class DomainHelperTests(unittest.TestCase):
         self.assertEqual(item["item_name"], "VPS Custom Configuration")
         self.assertEqual(item["hsn_sac"], "997315")
         self.assertEqual(item["unit"], "Year")
-        self.assertEqual(item["description"], description)
+        expected_description = (
+            "1 Year Plan\n"
+            "Username : Vishalagarwal103, Anandkumar103\n"
+            "Folder Name : PI From 15-May-2026 to 14-May-2027\n"
+            "154.210.197.98:61004 HSN: 997315"
+        )
+        self.assertEqual(item["description"], expected_description)
 
     def test_ai_normalization_defaults_missing_unit_to_pcs_when_quantity_exists(self) -> None:
         """Quantity-bearing lines without visible UOM should default to PCS for item-wise posting."""

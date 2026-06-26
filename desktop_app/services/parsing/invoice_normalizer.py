@@ -97,6 +97,12 @@ def enrich_line_item_identity(data: dict[str, Any]) -> None:
             item_name = extract_item_name(description)
             if item_name:
                 item["item_name"] = item_name
+        
+        # Clean item description
+        item_name = item.get("item_name")
+        if useful_text(item_name):
+            item["description"] = clean_item_description(item_name, item.get("description"))
+
 
 
 def useful_text(value: Any) -> bool:
@@ -186,3 +192,25 @@ def normalize_discounted_line_values(data: dict[str, Any]) -> None:
         expected = round((quantity * rate) - discount, CURRENCY_DECIMAL_PLACES) if quantity > 0 and rate > 0 else 0.0
         if abs(expected - invoice_taxable) <= 0.01:
             items[0]["taxable_value"] = invoice_taxable
+
+
+def clean_item_description(item_name: str | None, description: str | None) -> str:
+    """Remove the item name prefix from the description to prevent redundant text in Tally."""
+    if not description:
+        return ""
+    desc = description.strip()
+    if not item_name:
+        return desc
+    
+    clean_name = item_name.strip()
+    if not clean_name:
+        return desc
+        
+    if desc.lower().startswith(clean_name.lower()):
+        desc = desc[len(clean_name):].strip()
+        desc = desc.lstrip(" -:/,;.")
+    return desc
+
+
+
+
