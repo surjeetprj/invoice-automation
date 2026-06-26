@@ -876,6 +876,27 @@ class TallyServiceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 workflow.post_invoice_to_tally(invoice_id)
 
+    def test_clean_item_description(self) -> None:
+        """clean_item_description helper should strip the redundant item name prefix."""
+        from desktop_app.services.parsing.invoice_normalizer import clean_item_description
+        self.assertEqual(clean_item_description("Services", "Services - consulting"), "consulting")
+        self.assertEqual(clean_item_description("Services", "consulting services"), "consulting services")
+        self.assertEqual(clean_item_description("Services", "Services:consulting"), "consulting")
+        self.assertEqual(clean_item_description("Services", "Services"), "")
+        self.assertEqual(clean_item_description("", "consulting"), "consulting")
+        self.assertEqual(clean_item_description("Services", ""), "")
+
+    def test_inventory_purchase_voucher_includes_cleaned_description(self) -> None:
+        """Item-wise voucher XML should include description tags for non-redundant details."""
+        data = self.sample_invoice_data()
+        data.line_items[0].description = "Consulting Service - Additional detailed notes"
+        xml = build_inventory_purchase_voucher_xml(1, data).decode("utf-8")
+        self.assertIn("<DESCRIPTION>Additional detailed notes</DESCRIPTION>", xml)
+        self.assertIn("<BASICUSERDESCRIPTION.LIST TYPE=\"String\">", xml)
+        self.assertIn("<BASICUSERDESCRIPTION>Additional detailed notes</BASICUSERDESCRIPTION>", xml)
+        self.assertIn("<ADDLDESCRIPTION.LIST TYPE=\"String\">", xml)
+        self.assertIn("<ADDLDESCRIPTION>Additional detailed notes</ADDLDESCRIPTION>", xml)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,7 @@ from .mapping import (
 from ...domain.parsing import parse_date
 from ...domain.schemas import InvoiceData, SupplyType
 from ..exports.exporters import invoice_tax_totals, tax_components_for_item
+from ..parsing.invoice_normalizer import clean_item_description
 from .masters import (
     PURCHASE_VOUCHER_TYPE,
     TALLY_NOT_APPLICABLE,
@@ -91,6 +92,23 @@ def build_inventory_purchase_voucher_xml(invoice_id: int, data: InvoiceData) -> 
         stock_item_name = stock_item_name_from_line_item(item)
         unit_name = tally_unit_text(item.unit)
         add_text(inventory_entry, "STOCKITEMNAME", stock_item_name)
+        cleaned_desc = clean_item_description(item.item_name, item.description)
+        if cleaned_desc:
+            add_text(inventory_entry, "DESCRIPTION", cleaned_desc)
+            
+            # Additional User Description tags for TallyPrime compatibility
+            bud_list = SubElement(inventory_entry, "BASICUSERDESCRIPTION.LIST", TYPE="String")
+            for line in cleaned_desc.splitlines():
+                stripped = line.strip()
+                if stripped:
+                    add_text(bud_list, "BASICUSERDESCRIPTION", stripped)
+            
+            # Additional Description tags for alternative TDL structures
+            addl_list = SubElement(inventory_entry, "ADDLDESCRIPTION.LIST", TYPE="String")
+            for line in cleaned_desc.splitlines():
+                stripped = line.strip()
+                if stripped:
+                    add_text(addl_list, "ADDLDESCRIPTION", stripped)
         add_text(inventory_entry, "GSTOVRDNTAXABILITY", "Taxable")
         add_text(inventory_entry, "GSTSOURCETYPE", "Stock Item")
         add_text(inventory_entry, "GSTITEMSOURCE", stock_item_name)
