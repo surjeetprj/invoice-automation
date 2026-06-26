@@ -51,7 +51,13 @@ class LineItem(BaseModel):
             "Do not include HSN/SAC, serial numbers, usernames, IP addresses, service periods, or remarks."
         ),
     )
-    description: str = Field(default="", description="Visible product or service description for this row.")
+    description: str = Field(
+        default="",
+        description=(
+            "Visible product or service description for this row. "
+            "Do not repeat the item name at the beginning of the description if it is redundant."
+        ),
+    )
     hsn_sac: str | None = Field(default=None, description="Visible HSN or SAC code for this row.")
     quantity: float = Field(
         default=0.0,
