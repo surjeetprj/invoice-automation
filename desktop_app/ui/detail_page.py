@@ -311,6 +311,13 @@ class DetailPage(QWidget):
         header.addStretch()
         layout.addLayout(header)
 
+        # Error banner for extraction / parsing failures
+        self.error_banner = QLabel()
+        self.error_banner.setWordWrap(True)
+        self.error_banner.setObjectName("errorBanner")
+        self.error_banner.hide()
+        layout.addWidget(self.error_banner)
+
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter = self.splitter
         self.tabs = QTabWidget()
@@ -400,6 +407,19 @@ class DetailPage(QWidget):
 
         # Load raw markdown if present
         self.raw_text_pane.setText(invoice.get("raw_markdown") or "No raw markdown available.")
+
+        # Check for AI parsing errors
+        issues = invoice.get("validation", {}).get("issues") or []
+        ai_errors = [
+            issue.get("message")
+            for issue in issues
+            if issue.get("field") in ("AI Parser", "AI Quota")
+        ]
+        if ai_errors:
+            self.error_banner.setText("\n".join(f"Processing Error: {err}" for err in ai_errors))
+            self.error_banner.show()
+        else:
+            self.error_banner.hide()
 
         self.metadata.load_data(self.original_data)
         self.line_items.load_items(self.original_data.get("line_items") or [])

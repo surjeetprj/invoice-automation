@@ -66,6 +66,54 @@ class DetailPageLayoutTests(unittest.TestCase):
         finally:
             page.deleteLater()
 
+    def test_error_banner_visibility_on_ai_errors(self) -> None:
+        """The detail page error banner should show only when AI/parsing errors exist."""
+        page = DetailPage()
+        try:
+            # 1. No AI errors
+            page.load_invoice({
+                "id": 1,
+                "status": "Extracted",
+                "extracted_data": {},
+                "validation": {"issues": []},
+            })
+            self.assertTrue(page.error_banner.isHidden())
+
+            # 2. AI Quota error
+            page.load_invoice({
+                "id": 2,
+                "status": "Pending_Review",
+                "extracted_data": {},
+                "validation": {
+                    "issues": [{"severity": "error", "message": "Rate limit exceeded", "field": "AI Quota"}]
+                },
+            })
+            self.assertFalse(page.error_banner.isHidden())
+            self.assertIn("Processing Error: Rate limit exceeded", page.error_banner.text())
+
+            # 3. AI Parser error
+            page.load_invoice({
+                "id": 3,
+                "status": "Pending_Review",
+                "extracted_data": {},
+                "validation": {
+                    "issues": [{"severity": "error", "message": "Failed to parse JSON response", "field": "AI Parser"}]
+                },
+            })
+            self.assertFalse(page.error_banner.isHidden())
+            self.assertIn("Processing Error: Failed to parse JSON response", page.error_banner.text())
+
+            # 4. Cleared/no error again
+            page.load_invoice({
+                "id": 4,
+                "status": "Extracted",
+                "extracted_data": {},
+                "validation": {"issues": []},
+            })
+            self.assertTrue(page.error_banner.isHidden())
+        finally:
+            page.deleteLater()
+
     def test_embedded_line_items_are_included_in_corrections(self) -> None:
         """Moving line items into Metadata must preserve correction payloads."""
         page = DetailPage()
