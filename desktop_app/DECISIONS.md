@@ -72,3 +72,10 @@
   invoice approved.
 - Runtime uploads, exports, logs, `.env`, `.venv`, and local SQLite databases
   must stay out of git.
+- Line-item descriptions are normalized to strip redundant stock item name prefixes.
+- LineItem descriptions are nullable (`str | None`) in schemas, databases, and normalizers to handle blank descriptions gracefully without validation errors.
+- Gemini AI client is instructed via Pydantic schema and prompts to extract compact descriptions without redundant item names and to preserve multi-line formatting.
+- TallyPrime item-wise voucher exports embed line item descriptions within `<BASICUSERDESCRIPTION>` and `<ADDLDESCRIPTION>` tags for TallyPrime compatibility, omitting them dynamically when not present.
+- Disabled `QToolButton` elements (such as "Export Data") are styled with visual opacity/blur to match standard button disable states.
+- Invoice Detail page displays a prominent processing error banner at the top of the reviewer workspace when Gemini parsing fails due to quota limits or parsing exceptions, ensuring users are immediately notified.
+

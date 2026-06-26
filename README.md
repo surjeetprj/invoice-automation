@@ -76,7 +76,9 @@ Voucher details, party details, line items, shipping and transport, bank fields,
 and tax totals are grouped together so missing export-critical data can be
 checked against the document preview quickly. Required markers are informational
 in this version; they highlight likely export problems but do not block approval
-by themselves.
+by themselves. If an invoice fails visual or digital Gemini parsing due to quota
+limits or exceptions, the details page displays a prominent, styled error banner
+at the top of the workspace detailing the failure.
 
 `Submit Corrections` saves edited extraction data and refreshes validation, but
 it does not approve the invoice. Reviewers can save corrections multiple times.
@@ -88,7 +90,7 @@ The Export Data menu supports file-based exports and direct TallyPrime posting:
 - `Post Purchase Voucher to TallyPrime` posts a ledger-only accounting Purchase
   voucher to the local TallyPrime HTTP server.
 - `Post Item-wise Purchase Voucher to TallyPrime` posts an inventory Purchase
-  voucher using reviewed line items.
+  voucher using reviewed line items, preserving clean stock item names while including additional descriptions in TallyPrime-compatible XML tags.
 - `Sync Vendor Ledger to TallyPrime` syncs the party ledger master.
 - `Sync Purchase and GST Ledgers to TallyPrime` syncs configured purchase and
   input tax ledgers.

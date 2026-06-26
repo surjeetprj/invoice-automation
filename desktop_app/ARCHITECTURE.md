@@ -31,7 +31,10 @@ Digital PDF extraction can be enabled or disabled for table parsing with
 `PDF_TABLE_EXTRACTION_ENABLED`. Workflow logs report PDF extraction time and AI
 parsing time separately so slow invoices can be diagnosed without guessing.
 Gemini quota/rate-limit failures are converted into validation issues and the
-invoice remains available for review.
+invoice remains available for review. When Gemini parsing fails (e.g. rate limit,
+quota exceeded, or general parse exceptions), the UI clearly notifies the user of
+the error that occurred during processing by displaying a prominent, styled
+error banner at the top of the details view on the Invoice Details page.
 
 ## Key Modules
 
@@ -45,7 +48,7 @@ invoice remains available for review.
 - `services/documents/extraction.py`: digital PDF text and table extraction.
 - `services/parsing/invoice_normalizer.py`: numeric, GST, total, and visual line-item
   reconciliation, plus deterministic line-item identity cleanup for item names,
-  HSN/SAC codes, and units.
+  HSN/SAC codes, and units, including stripping redundant item-name prefixes from descriptions.
 - `domain/schemas.py`: Pydantic data contracts shared across layers.
 - `domain/validation.py`: GST and arithmetic validation rules.
 - `db/models.py`: normalized SQLAlchemy tables.
@@ -118,7 +121,8 @@ Both modes follow a controlled flow:
 - For item-wise posting, create or sync required stock groups, units, and stock
   items where allowed. Item-wise posting uses reviewed `item_name` values as
   clean stock item/master names and preserves the full invoice `description`
-  separately.
+  separately, embedding descriptions in TallyPrime voucher exports within nested
+  `<BASICUSERDESCRIPTION.LIST>` and `<ADDLDESCRIPTION.LIST>` elements.
 - Mark the invoice as `Posted` only after Tally accepts the voucher.
 
 Master creation is intentionally controlled. Vendor ledgers are created under
