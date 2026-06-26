@@ -898,6 +898,21 @@ class TallyServiceTests(unittest.TestCase):
         self.assertIn("<ADDLDESCRIPTION.LIST TYPE=\"String\">", xml)
         self.assertIn("<ADDLDESCRIPTION>Additional detailed notes</ADDLDESCRIPTION>", xml)
 
+    def test_inventory_purchase_voucher_omits_description_when_empty(self) -> None:
+        """Item-wise voucher XML should omit description tags entirely if description is empty or None."""
+        data = self.sample_invoice_data()
+        data.line_items[0].description = None
+        xml = build_inventory_purchase_voucher_xml(1, data).decode("utf-8")
+        self.assertNotIn("<DESCRIPTION>", xml)
+        self.assertNotIn("<BASICUSERDESCRIPTION.LIST", xml)
+        self.assertNotIn("<ADDLDESCRIPTION.LIST", xml)
+
+        data.line_items[0].description = ""
+        xml2 = build_inventory_purchase_voucher_xml(1, data).decode("utf-8")
+        self.assertNotIn("<DESCRIPTION>", xml2)
+        self.assertNotIn("<BASICUSERDESCRIPTION.LIST", xml2)
+        self.assertNotIn("<ADDLDESCRIPTION.LIST", xml2)
+
 
 if __name__ == "__main__":
     unittest.main()
