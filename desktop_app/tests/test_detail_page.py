@@ -57,8 +57,11 @@ class DetailPageLayoutTests(unittest.TestCase):
                     "confidence_score": 0.5,
                     "extracted_data": {},
                     "validation": {"is_valid": True, "errors": [], "warnings": [], "issues": []},
+                    "ai_call_count": 3,
+                    "reprocess_count": 2,
                 }
             )
+            self.assertEqual(page.summary.text(), "Confidence: 50% | AI calls: 3 | Reprocesses: 2")
             for field in REQUIRED_METADATA_FIELDS:
                 self.assertEqual(page.metadata.fields[field].objectName(), "requiredMissing")
             self.assertTrue(page.approve_btn.isEnabled())

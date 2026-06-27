@@ -264,6 +264,8 @@ class InvoiceRecord(BaseModel):
     reviewed_by: str | None = None
     reviewed_at: datetime | None = None
     processing_time_ms: int | None = None
+    ai_call_count: int = 0
+    reprocess_count: int = 0
     rejection_reason: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

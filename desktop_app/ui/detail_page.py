@@ -403,7 +403,12 @@ class DetailPage(QWidget):
         self.original_mappings = copy.deepcopy(invoice.get("tally_mappings") or [])
         confidence = invoice.get("confidence_score")
         self.title.setText(f"Invoice #{invoice.get('id')} - {invoice.get('status')}")
-        self.summary.setText(f"Confidence: {float(confidence) * 100:.0f}%" if confidence is not None else "")
+        summary_parts = []
+        if confidence is not None:
+            summary_parts.append(f"Confidence: {float(confidence) * 100:.0f}%")
+        summary_parts.append(f"AI calls: {int(invoice.get('ai_call_count') or 0)}")
+        summary_parts.append(f"Reprocesses: {int(invoice.get('reprocess_count') or 0)}")
+        self.summary.setText(" | ".join(summary_parts))
 
         # Load raw markdown if present
         self.raw_text_pane.setText(invoice.get("raw_markdown") or "No raw markdown available.")

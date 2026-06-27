@@ -66,6 +66,8 @@ class Invoice(Base):
     supply_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     processing_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ai_call_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reprocess_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

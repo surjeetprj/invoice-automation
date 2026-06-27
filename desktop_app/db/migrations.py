@@ -28,6 +28,8 @@ INVOICE_COLUMN_DDL = {
     "supply_type": "ALTER TABLE invoices ADD COLUMN supply_type VARCHAR(20)",
     "confidence_score": "ALTER TABLE invoices ADD COLUMN confidence_score FLOAT",
     "processing_time_ms": "ALTER TABLE invoices ADD COLUMN processing_time_ms INTEGER",
+    "ai_call_count": "ALTER TABLE invoices ADD COLUMN ai_call_count INTEGER NOT NULL DEFAULT 0",
+    "reprocess_count": "ALTER TABLE invoices ADD COLUMN reprocess_count INTEGER NOT NULL DEFAULT 0",
     "reviewed_by": "ALTER TABLE invoices ADD COLUMN reviewed_by VARCHAR(100)",
     "reviewed_at": "ALTER TABLE invoices ADD COLUMN reviewed_at DATETIME",
     "rejection_reason": "ALTER TABLE invoices ADD COLUMN rejection_reason TEXT",

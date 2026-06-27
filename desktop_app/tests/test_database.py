@@ -147,11 +147,15 @@ class DatabasePersistenceTests(unittest.TestCase):
             db.commit()
             db.refresh(invoice)
 
+            invoice.ai_call_count = 2
+            invoice.reprocess_count = 1
             record = DesktopWorkflow().invoice_to_record(invoice).model_dump(mode="json")
             self.assertEqual(record["filename"], "invoice.pdf")
             self.assertEqual(record["raw_markdown"], "raw text")
             self.assertEqual(record["extracted_data"]["invoice_number"], "INV-1")
             self.assertEqual(record["validation"]["issues"], [])
+            self.assertEqual(record["ai_call_count"], 2)
+            self.assertEqual(record["reprocess_count"], 1)
 
     def test_run_pipeline_handles_ai_rate_limit_cleanly(self) -> None:
         """Quota failures should create reviewable validation issues without losing raw text."""
@@ -174,12 +178,55 @@ class DatabasePersistenceTests(unittest.TestCase):
 
             db.refresh(invoice)
             self.assertEqual(invoice.status, InvoiceStatus.PENDING_REVIEW)
+            self.assertEqual(invoice.ai_call_count, 1)
             self.assertEqual(raw_markdown_from_invoice(invoice), "raw invoice text")
             validation = validation_from_invoice(invoice)
             self.assertFalse(validation.is_valid)
             self.assertIn("quota", validation.errors[0].lower())
             messages = [log.action for log in invoice.audit_logs]
             self.assertTrue(any(message.startswith("AI quota/rate limit") for message in messages))
+            self.assertTrue(any(message == "AI client call #1" for message in messages))
+
+    def test_reprocess_invoice_increments_reprocess_and_ai_usage_counts(self) -> None:
+        """Reprocessing should track both the reprocess request and the AI parser call."""
+        engine = self.make_engine()
+        Base.metadata.create_all(engine)
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = Invoice(filename="invoice.pdf", file_path="C:/tmp/invoice.pdf", status=InvoiceStatus.PENDING_REVIEW)
+            db.add(invoice)
+            db.commit()
+            invoice_id = invoice.id
+
+        source = InvoiceSource(path=Path("C:/tmp/invoice.pdf"), document_kind=DocumentKind.DIGITAL_PDF, mime_type="application/pdf")
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with (
+            patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)),
+            patch("pathlib.Path.exists", return_value=True),
+            patch("desktop_app.services.workflow.classify_document", return_value=source),
+            patch("desktop_app.services.workflow.extract_invoice_source_text", return_value="raw invoice text"),
+            patch(
+                "desktop_app.services.workflow.parse_invoice",
+                return_value={
+                    "invoice_number": "INV-REPROCESS",
+                    "date": "01-05-2026",
+                    "vendor_name": "Vendor Pvt Ltd",
+                    "line_items": [{"description": "Service", "taxable_value": 100.0}],
+                    "total_taxable_amount": 100.0,
+                    "total_amount": 100.0,
+                },
+            ),
+        ):
+            result = workflow.reprocess_invoice(invoice_id)
+
+        self.assertEqual(result["reprocess_count"], 1)
+        self.assertEqual(result["ai_call_count"], 1)
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = db.get(Invoice, invoice_id)
+            self.assertIsNotNone(invoice)
+            assert invoice is not None
+            self.assertEqual(invoice.reprocess_count, 1)
+            self.assertEqual(invoice.ai_call_count, 1)
 
     def test_upload_invoice_emits_user_facing_progress_messages(self) -> None:
         """Upload processing should report friendly high-level progress messages."""
@@ -216,6 +263,8 @@ class DatabasePersistenceTests(unittest.TestCase):
 
         messages = [event["message"] for event in progress_events]
         self.assertEqual(invoice["status"], InvoiceStatus.PENDING_REVIEW)
+        self.assertEqual(invoice["ai_call_count"], 1)
+        self.assertEqual(invoice["reprocess_count"], 0)
         self.assertIn("Checking file type and size...", messages)
         self.assertIn("Copying invoice into local workspace...", messages)
         self.assertIn("Classifying invoice document type...", messages)

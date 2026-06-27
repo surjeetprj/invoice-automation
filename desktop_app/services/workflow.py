@@ -307,6 +307,7 @@ class DesktopWorkflow:
             path = Path(invoice.file_path)
             if not path.exists():
                 raise FileNotFoundError(f"Original file not found: {path}")
+            invoice.reprocess_count = (invoice.reprocess_count or 0) + 1
             self.log(db, invoice.id, "Reprocessing triggered", user="human")
             self.run_pipeline(db, invoice, path)
             db.refresh(invoice)
@@ -589,6 +590,7 @@ class DesktopWorkflow:
                 logger.info("AI parsing started for invoice #%s", invoice.id)
                 self.progress(progress_callback, "Sending invoice text to Gemini for structured extraction...")
                 ai_start = time.perf_counter()
+                self.record_ai_call(db, invoice)
                 parsed = parse_invoice(raw_markdown, vendor_hint=invoice.filename)
             else:
                 logger.info("Visual parsing route selected for invoice #%s: %s", invoice.id, source.document_kind.value)
@@ -597,6 +599,7 @@ class DesktopWorkflow:
                 logger.info("AI parsing started for invoice #%s", invoice.id)
                 self.progress(progress_callback, "Preparing visual invoice for Gemini multimodal extraction...")
                 ai_start = time.perf_counter()
+                self.record_ai_call(db, invoice)
                 parsed = parse_invoice_file(source.path, source.mime_type, invoice.filename, document_kind=source.document_kind.value)
             ai_time_ms = int((time.perf_counter() - ai_start) * 1000)
             logger.info("AI parsing finished for invoice #%s in %sms", invoice.id, ai_time_ms)
@@ -667,6 +670,8 @@ class DesktopWorkflow:
             reviewed_by=invoice.reviewed_by,
             reviewed_at=invoice.reviewed_at,
             processing_time_ms=invoice.processing_time_ms,
+            ai_call_count=invoice.ai_call_count or 0,
+            reprocess_count=invoice.reprocess_count or 0,
             rejection_reason=invoice.rejection_reason,
             created_at=invoice.created_at,
             updated_at=invoice.updated_at,
@@ -708,6 +713,12 @@ class DesktopWorkflow:
         if invoice is None:
             raise ValueError(f"Invoice {invoice_id} not found")
         return invoice
+
+    def record_ai_call(self, db, invoice: Invoice) -> None:
+        """Increment durable per-invoice AI usage before invoking the parser."""
+        invoice.ai_call_count = (invoice.ai_call_count or 0) + 1
+        db.commit()
+        self.log(db, invoice.id, f"AI client call #{invoice.ai_call_count}")
 
     def log(self, db, invoice_id: int, action: str, reason: str | None = None, user: str = "system") -> None:
         """Persist one audit log row and emit the same event to app logs."""
