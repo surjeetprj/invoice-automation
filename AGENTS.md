@@ -55,7 +55,7 @@ Working rules:
   vouchers; item-wise posting creates inventory purchase vouchers with stock
   item and unit masters only after reviewer confirmation.
 - Keep `LineItem.item_name` as the clean TallyPrime stock item/master name.
-  Preserve `LineItem.description` as the full visible invoice row text.
+  Keep `LineItem.description` as optional multiline detail text without a redundant item-name prefix.
 - Keep database models, repository helpers, and migrations in `desktop_app/db`.
 - Keep Pydantic schemas, parsing helpers, and validation in `desktop_app/domain`.
 - Keep review UI changes focused on surfacing missing export-essential fields
@@ -68,9 +68,6 @@ Working rules:
   enrichment modules.
 - Keep Gemini quota/rate-limit failures reviewable: persist the invoice with a
   validation issue instead of crashing the desktop app.
-- Keep XML parsing robust: sanitize invalid control characters/entities (e.g. `&#4;` and non-printable hex codes) using regex before parsing XML strings using `ElementTree` to avoid `ParseError`.
-- Avoid using python boolean operators (`or`) directly on `ElementTree.Element` objects because empty elements (elements with no subelements) evaluate to `False` in boolean contexts.
-- Prevent TallyPrime collection and TDL caching by appending a unique random suffix (e.g. `uuid.uuid4().hex[:12]`) to the collection name and header ID for all export XML queries.
 - Do not commit `.env`, `.venv`, runtime uploads, exports, logs, or local SQLite databases.
 - Do not delete local runtime data unless the user explicitly asks for cleanup.
 - Prefer preserving user invoice history, audit logs, and review state during upgrades.

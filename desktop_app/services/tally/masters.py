@@ -24,6 +24,7 @@ from .mapping import (
     mapped_default,
     mapped_value,
 )
+from .xml_utils import unique_collection_name
 from ...domain.schemas import InvoiceData, LineItem
 from ...domain.parsing import parse_date
 
@@ -206,9 +207,7 @@ def tax_ledger_masters(*, action: str = "Alter") -> list[TallyMaster]:
 
 def build_collection_export_xml(collection_name: str, master_type: str, company: str | None = None) -> bytes:
     """Build a Tally collection export request used for preflight existence checks."""
-    import uuid
-    # Append a unique suffix to collection name to bypass TallyPrime's collection/TDL caching
-    unique_name = f"{collection_name}_{uuid.uuid4().hex[:12]}"
+    unique_name = unique_collection_name(collection_name)
     envelope = Element("ENVELOPE")
     header = SubElement(envelope, "HEADER")
     add_text(header, "VERSION", "1")

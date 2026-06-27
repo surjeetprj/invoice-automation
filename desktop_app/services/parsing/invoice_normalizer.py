@@ -97,8 +97,6 @@ def enrich_line_item_identity(data: dict[str, Any]) -> None:
             item_name = extract_item_name(description)
             if item_name:
                 item["item_name"] = item_name
-        
-        # Clean item description
         item_name = item.get("item_name")
         if useful_text(item_name):
             item["description"] = clean_item_description(item_name, item.get("description"))
@@ -143,7 +141,7 @@ def extract_unit(description: str) -> str | None:
 
 
 def extract_item_name(description: str) -> str | None:
-    """Extract a concise item/service name while preserving the full description elsewhere."""
+    """Extract a concise item/service name from the first visible detail line."""
     if not description:
         return None
     # If the description has multiple lines, the first non-empty line is typically the item name header
@@ -203,22 +201,33 @@ def normalize_discounted_line_values(data: dict[str, Any]) -> None:
 
 
 def clean_item_description(item_name: str | None, description: str | None) -> str:
-    """Remove the item name prefix from the description to prevent redundant text in Tally."""
+    """Remove an exact item-name header/prefix while keeping multiline details."""
     if not description:
         return ""
     desc = description.strip()
     if not item_name:
         return desc
-    
     clean_name = item_name.strip()
     if not clean_name:
         return desc
-        
-    if desc.lower().startswith(clean_name.lower()):
-        desc = desc[len(clean_name):].strip()
-        desc = desc.lstrip(" -:/,;.")
-    return desc
+    lines = [line.strip() for line in desc.splitlines()]
+    first_line = lines[0] if lines else ""
+    remaining_first = remove_item_name_prefix(first_line, clean_name)
+    if remaining_first is None:
+        return desc
+    cleaned_lines = ([remaining_first] if remaining_first else []) + [line for line in lines[1:] if line]
+    return "\n".join(cleaned_lines).strip()
 
 
-
-
+def remove_item_name_prefix(line: str, item_name: str) -> str | None:
+    """Return a line without the exact item-name prefix, or None when no match exists."""
+    if line.casefold() == item_name.casefold():
+        return ""
+    if not line.casefold().startswith(item_name.casefold()):
+        return None
+    remainder = line[len(item_name):]
+    if not remainder:
+        return ""
+    if remainder[0] not in " \t-:/,;.|":
+        return None
+    return remainder.lstrip(" \t-:/,;.|").strip()

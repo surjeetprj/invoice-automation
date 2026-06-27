@@ -403,6 +403,18 @@ class TallyServiceTests(unittest.TestCase):
         self.assertIn("BOX", names)
         self.assertIn("Box Name", names)
 
+
+    def test_parse_master_names_sanitizes_invalid_xml_without_dropping_valid_entities(self) -> None:
+        """Tally XML parsing should remove invalid references while preserving valid text."""
+        from desktop_app.services.tally.client import parse_master_names
+        xml = """<ENVELOPE><BODY><DATA><COLLECTION>
+        <LEDGER NAME="A &amp; B Services" />
+        <LEDGER NAME="Invalid &#4; Control" />
+        </COLLECTION></DATA></BODY></ENVELOPE>"""
+        names = parse_master_names(xml)
+        self.assertIn("A & B Services", names)
+        self.assertIn("Invalid  Control", names)
+
     def test_build_collection_export_xml_for_unit(self) -> None:
         """Collection export XML for Unit master type should fetch both NAME and FORMALNAME."""
         from desktop_app.services.tally.masters import build_collection_export_xml
@@ -880,6 +892,7 @@ class TallyServiceTests(unittest.TestCase):
         """clean_item_description helper should strip the redundant item name prefix."""
         from desktop_app.services.parsing.invoice_normalizer import clean_item_description
         self.assertEqual(clean_item_description("Services", "Services - consulting"), "consulting")
+        self.assertEqual(clean_item_description("Service", "Services Renewal"), "Services Renewal")
         self.assertEqual(clean_item_description("Services", "consulting services"), "consulting services")
         self.assertEqual(clean_item_description("Services", "Services:consulting"), "consulting")
         self.assertEqual(clean_item_description("Services", "Services"), "")
@@ -890,7 +903,7 @@ class TallyServiceTests(unittest.TestCase):
     def test_inventory_purchase_voucher_includes_cleaned_description(self) -> None:
         """Item-wise voucher XML should include description tags for non-redundant details."""
         data = self.sample_invoice_data()
-        data.line_items[0].description = "Consulting Service - Additional detailed notes"
+        data.line_items[0].description = "Additional detailed notes"
         xml = build_inventory_purchase_voucher_xml(1, data).decode("utf-8")
         self.assertIn("<DESCRIPTION>Additional detailed notes</DESCRIPTION>", xml)
         self.assertIn("<BASICUSERDESCRIPTION.LIST TYPE=\"String\">", xml)

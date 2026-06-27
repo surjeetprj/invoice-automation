@@ -69,7 +69,7 @@ class DomainHelperTests(unittest.TestCase):
             self.assertIn("IGST", prompt)
             self.assertIn("CESS", prompt)
             self.assertIn("item_name", prompt)
-            self.assertIn("full visible row text", prompt)
+            self.assertIn("optional multiline item details", prompt)
             self.assertIn("HSN: 997315", prompt)
             self.assertIn("yr, year, month, nos, pcs, license, or user", prompt)
 

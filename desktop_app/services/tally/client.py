@@ -42,6 +42,7 @@ from .serial import (
     parse_tally_about_page_serial_number,
     tally_response_summary,
 )
+from .xml_utils import unique_collection_name
 from .vouchers import build_inventory_purchase_voucher_xml, build_purchase_voucher_xml
 
 logger = logging.getLogger(__name__)
@@ -180,8 +181,7 @@ class TallyClient:
 
 def build_tally_companies_xml() -> bytes:
     """Build a Tally collection export request for all company names."""
-    import uuid
-    unique_name = f"InvoiceAICompanies_{uuid.uuid4().hex[:12]}"
+    unique_name = unique_collection_name("InvoiceAICompanies")
     envelope = Element("ENVELOPE")
     header = SubElement(envelope, "HEADER")
     SubElement(header, "VERSION").text = "1"

@@ -81,7 +81,7 @@ def build_line_item(item: LineItem, position: int) -> InvoiceLineItem:
         position=position,
         sr_no=item.sr_no,
         item_name=item.item_name,
-        description=item.description,
+        description=item.description or "",
         hsn_sac=item.hsn_sac,
         quantity=item.quantity,
         unit=item.unit,

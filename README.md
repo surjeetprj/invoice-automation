@@ -118,7 +118,7 @@ wrongly, or not open/loaded in TallyPrime, export is blocked before masters or
 vouchers are created.
 Missing masters are created only after reviewer confirmation. Item-wise posting
 uses the reviewed `Item Name` field as the clean TallyPrime stock item/master
-name while preserving the full invoice description separately. It can create
+name while keeping multiline item details separately. It can create
 required units, stock groups, and stock items, and it blocks before posting when
 reviewed item data is incomplete.
 

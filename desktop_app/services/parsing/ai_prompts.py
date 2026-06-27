@@ -18,8 +18,8 @@ Important GST rules:
 - Use the taxable amount after line or invoice-level discount.
 - If a table has Qty, Rate, Discount, GST, Amount, preserve those values in the
   matching line item and tax rows.
-- For each line item, set item_name to the short clean product/service name and
-  keep description as the full visible row text.
+- For each line item, set item_name to the short clean product/service name.
+  Keep description as optional multiline item details without repeating item_name.
 - Extract HSN/SAC even when embedded inside description text such as HSN: 997315,
   SAC : 998434, or HSN/SAC 9973.
 - Extract unit from a visible unit column first, then from explicit description
@@ -53,8 +53,8 @@ Important GST rules:
 - Use the taxable amount after line or invoice-level discount.
 - Preserve GST component type, rate, taxable amount, and tax amount for CGST,
   SGST, IGST, and CESS in line item taxes and invoice-level tax_breakup.
-- For each line item, set item_name to the short clean product/service name and
-  keep description as the full visible row text.
+- For each line item, set item_name to the short clean product/service name.
+  Keep description as optional multiline item details without repeating item_name.
 - Extract HSN/SAC even when embedded inside description text such as HSN: 997315,
   SAC : 998434, or HSN/SAC 9973.
 - Extract unit from a visible unit column first, then from explicit description
@@ -66,7 +66,7 @@ Important GST rules:
   taxable value, GST rate/amount, and row total when present.
 - If any scanned/image item row is unclear or partially readable, do not guess.
   Return exactly one summary line:
-  description = best visible item description or "Purchase as per invoice";
+  item_name = best visible item name; description = best visible item details or "";
   quantity = 1; rate = total_taxable_amount;
   taxable_value = total_taxable_amount;
   taxes = invoice-level GST components; total = total_amount.

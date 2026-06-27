@@ -21,7 +21,7 @@
 - GST rates must remain visible, editable, preserved through corrections, and
   available for export.
 - Line items have both `item_name` and `description`. `item_name` is the clean
-  TallyPrime stock item/master name; `description` is the full invoice row text.
+  TallyPrime stock item/master name; `description` is optional multiline detail text without redundant item-name prefixes.
 - Exports represent purchase vouchers, not sales invoices.
 - The Metadata tab is the primary reviewer workspace. Line items belong inside
   Metadata, alongside voucher, party, shipping, bank, and tax-total groups, so
@@ -53,9 +53,6 @@
 - Customer-editable Tally connection values live in runtime `settings.json`; Tally URL, timeout, and selected company are global. Confirmed ledger/group/item/unit mappings live in SQLite `tally_master_mapping` rows keyed by company, mapping type, and source value.
 - Settings should prefer Tally-provided dropdown choices for ledger mappings and Stock groups while remaining editable for intentional master creation. Similarity-ranked suggestions are allowed for invoice-review dynamic mappings, but SQL confirmed mappings remain the posting source of truth.
 - Settings-page dropdown choices must be populated dynamically by querying Tally master parents and recursively tracing descendants to enforce correct accounting categories (e.g., Vendor A/C Group must only show descendants of "Sundry Creditors").
-- Dynamic Tally collection names and export request IDs must be randomized using a unique UUID suffix to bypass TallyPrime's collection/TDL server-side caching.
-- XML control character entity references like `&#4;` and non-printable bytes must be sanitized using regex before parsing using ElementTree to avoid silent ParseError failures during preflight checks and lookup loading.
-- Boolean `or` operators must not be applied directly to ElementTree Element objects because empty elements evaluate to `False` in boolean contexts.
 - Invoice-review dynamic mapping rows must carry their generated company context. Correction saves must use that submitted company, not whichever company is selected globally at save time.
 - Refreshing Tally ledger/group dropdowns must not clear mapping fields; preserve
   saved/current values and fall back to `.env`/config defaults for new companies.
@@ -78,4 +75,3 @@
 - TallyPrime item-wise voucher exports embed line item descriptions within `<BASICUSERDESCRIPTION>` and `<ADDLDESCRIPTION>` tags for TallyPrime compatibility, omitting them dynamically when not present.
 - Disabled `QToolButton` elements (such as "Export Data") are styled with visual opacity/blur to match standard button disable states.
 - Invoice Detail page displays a prominent processing error banner at the top of the reviewer workspace when Gemini parsing fails due to quota limits or parsing exceptions, ensuring users are immediately notified.
-
