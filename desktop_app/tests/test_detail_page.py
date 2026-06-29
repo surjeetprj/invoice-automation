@@ -8,9 +8,11 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QDate
 from PySide6.QtWidgets import QApplication
 
 from desktop_app.ui.constants import FIELD_GROUPS, LINE_COLUMNS, REQUIRED_METADATA_FIELDS
+from desktop_app.ui.dashboard_page import DashboardPage
 from desktop_app.ui.detail_page import DetailPage
 from desktop_app.ui.main_window import MainWindow
 from desktop_app.ui.settings_dialog import SettingsDialog
@@ -316,6 +318,78 @@ class DetailPageLayoutTests(unittest.TestCase):
             page.deleteLater()
 
 
+    def test_dashboard_usage_date_and_cards_render_stats(self) -> None:
+        """Dashboard should expose a default date picker and render usage KPI cards."""
+        page = DashboardPage()
+        try:
+            self.assertEqual(page.usage_from_date(), QDate.currentDate().toString("yyyy-MM-dd"))
+            for label in ("Total Invoices", "Usage Since Date", "AI Calls", "Reprocesses", "Pending Review"):
+                self.assertNotIn(label, page.cards)
+            self.assertGreaterEqual(page.usage_chart.canvas.minimumHeight(), 280)
+            self.assertGreaterEqual(page.usage_chart.canvas.sizeHint().height(), 300)
+            self.assertEqual(page.status_chart.title_label.text(), "Invoice Status Distribution")
+            self.assertIs(page.usage_chart.controls.itemAt(1).widget(), page.usage_from)
+
+            page.set_stats(
+                {
+                    "total_invoices": 4,
+                    "avg_processing_time_ms": 1500,
+                    "total_approved": 2,
+                    "total_pending_review": 1,
+                    "total_usage_count": 7,
+                    "ai_calls_since_date": 5,
+                    "reprocesses_since_date": 2,
+                    "status_distribution": {"Approved": 2, "Pending_Review": 1},
+                }
+            )
+
+            self.assertEqual(
+                [(label, count) for label, count, _color in page.usage_chart.segments],
+                [("AI Calls", 5), ("Reprocesses", 2)],
+            )
+            self.assertEqual(
+                [(label, count) for label, count, _color in page.status_chart.segments],
+                [("Approved", 2), ("Pending Review", 1)],
+            )
+        finally:
+            page.deleteLater()
+
+    def test_dashboard_date_change_requests_refresh(self) -> None:
+        """Changing the usage date should refresh dashboard stats."""
+        page = DashboardPage()
+        refreshes = []
+        try:
+            page.refresh_requested.connect(lambda: refreshes.append(page.usage_from_date()))
+            page.usage_from.setDate(QDate(2026, 6, 15))
+            self.assertEqual(refreshes[-1], "2026-06-15")
+        finally:
+            page.deleteLater()
+
+
+    def test_dashboard_charts_show_empty_states(self) -> None:
+        """Dashboard donuts should keep empty-state labels when no chart data exists."""
+        page = DashboardPage()
+        try:
+            page.set_stats(
+                {
+                    "total_invoices": 0,
+                    "total_usage_count": 0,
+                    "ai_calls_since_date": 0,
+                    "reprocesses_since_date": 0,
+                    "status_distribution": {},
+                }
+            )
+
+            self.assertEqual(page.usage_chart.segments, [])
+            self.assertEqual(page.status_chart.segments, [])
+            self.assertEqual(page.usage_chart.canvas.toolTip(), "No usage")
+            self.assertEqual(page.status_chart.canvas.toolTip(), "No invoices")
+            self.assertEqual(page.usage_chart.legend_labels[0].text(), "No usage")
+            self.assertEqual(page.status_chart.legend_labels[0].text(), "No invoices")
+        finally:
+            page.deleteLater()
+
+
     def test_main_window_uses_top_bar_navigation(self) -> None:
         """The app shell should use a top bar instead of the old sidebar splitter."""
 
@@ -335,8 +409,8 @@ class DetailPageLayoutTests(unittest.TestCase):
             def health(self):
                 return {"status": "ok"}
 
-            def stats(self):
-                return {}
+            def stats(self, usage_from_date=None):
+                return {"usage_from_date": usage_from_date}
 
             def list_invoices(self):
                 return {"invoices": []}

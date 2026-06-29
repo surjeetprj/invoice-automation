@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -136,6 +137,52 @@ class DatabasePersistenceTests(unittest.TestCase):
             self.assertEqual(loaded.errors, ["Bad total"])
             self.assertEqual(loaded.warnings, ["Check GSTIN"])
             self.assertEqual(len(loaded.issues), 2)
+
+    def test_dashboard_stats_count_usage_events_since_selected_date(self) -> None:
+        """Dashboard usage totals should use audit event timestamps, not invoice totals."""
+        engine = self.make_engine()
+        Base.metadata.create_all(engine)
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            pending = Invoice(
+                filename="pending.pdf",
+                file_path="C:/tmp/pending.pdf",
+                status=InvoiceStatus.PENDING_REVIEW,
+                processing_time_ms=1000,
+                confidence_score=0.8,
+            )
+            approved = Invoice(
+                filename="approved.pdf",
+                file_path="C:/tmp/approved.pdf",
+                status=InvoiceStatus.APPROVED,
+                processing_time_ms=3000,
+                confidence_score=0.6,
+            )
+            db.add_all([pending, approved])
+            db.flush()
+            db.add_all(
+                [
+                    AuditLog(invoice_id=pending.id, action="AI client call #1", timestamp=datetime(2026, 6, 14, 23, 59, 59)),
+                    AuditLog(invoice_id=pending.id, action="AI client call #2", timestamp=datetime(2026, 6, 15, 0, 0, 0)),
+                    AuditLog(invoice_id=pending.id, action="Reprocessing triggered", timestamp=datetime(2026, 6, 16, 9, 30, 0)),
+                    AuditLog(invoice_id=approved.id, action="AI client call #1", timestamp=datetime(2026, 6, 17, 12, 0, 0)),
+                    AuditLog(invoice_id=approved.id, action="Invoice uploaded", timestamp=datetime(2026, 6, 17, 12, 1, 0)),
+                ]
+            )
+            db.commit()
+
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            stats = workflow.stats("2026-06-15")
+
+        self.assertEqual(stats["usage_from_date"], "2026-06-15")
+        self.assertEqual(stats["ai_calls_since_date"], 2)
+        self.assertEqual(stats["reprocesses_since_date"], 1)
+        self.assertEqual(stats["total_usage_count"], 3)
+        self.assertEqual(stats["total_invoices"], 2)
+        self.assertEqual(stats["total_pending_review"], 1)
+        self.assertEqual(stats["total_approved"], 1)
+        self.assertEqual(stats["avg_processing_time_ms"], 2000.0)
 
     def test_workflow_record_shape_matches_ui_contract(self) -> None:
         """DesktopWorkflow should expose the same InvoiceRecord payload shape."""

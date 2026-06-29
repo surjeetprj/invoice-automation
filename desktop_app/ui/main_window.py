@@ -226,7 +226,7 @@ class MainWindow(SettingsActionsMixin, TallyActionsMixin, QMainWindow):
     def load_dashboard(self) -> None:
         """Load dashboard statistics in the background."""
         self.dashboard.set_loading()
-        self.run_task(self.workflow.stats, self.dashboard.set_stats)
+        self.run_task(self.workflow.stats, self.dashboard.set_stats, self.dashboard.usage_from_date())
 
     def load_invoices(self) -> None:
         """Load invoice table records in the background."""

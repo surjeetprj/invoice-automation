@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import shutil
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, time as datetime_time, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -194,10 +194,12 @@ class DesktopWorkflow:
         self.initialize()
         return {"status": "healthy", "service": "Invoice AI Desktop"}
 
-    def stats(self) -> dict[str, Any]:
+    def stats(self, usage_from_date: str | None = None) -> dict[str, Any]:
         """Calculate dashboard statistics from the local database."""
         self.initialize()
-        logger.info("Loading dashboard stats")
+        usage_date = self.parse_usage_from_date(usage_from_date)
+        usage_start = datetime.combine(usage_date, datetime_time.min)
+        logger.info("Loading dashboard stats from usage date %s", usage_date.isoformat())
         with session_scope() as db:
             total = db.scalar(select(func.count(Invoice.id))) or 0
             avg_time = db.scalar(select(func.avg(Invoice.processing_time_ms)))
@@ -208,6 +210,18 @@ class DesktopWorkflow:
             }
             by_status = {key: value for key, value in by_status.items() if value > 0}
             approved = db.scalar(select(func.count(Invoice.id)).where(Invoice.status.in_([InvoiceStatus.APPROVED, InvoiceStatus.POSTED]))) or 0
+            ai_calls = db.scalar(
+                select(func.count(AuditLog.id)).where(
+                    AuditLog.timestamp >= usage_start,
+                    AuditLog.action.like("AI client call #%"),
+                )
+            ) or 0
+            reprocesses = db.scalar(
+                select(func.count(AuditLog.id)).where(
+                    AuditLog.timestamp >= usage_start,
+                    AuditLog.action == "Reprocessing triggered",
+                )
+            ) or 0
             stats = DashboardStats(
                 total_invoices=total,
                 by_status=by_status,
@@ -217,8 +231,23 @@ class DesktopWorkflow:
                 total_pending_review=by_status.get(InvoiceStatus.PENDING_REVIEW, 0),
                 total_approved=approved,
                 total_rejected=by_status.get(InvoiceStatus.REJECTED, 0),
+                usage_from_date=usage_date.isoformat(),
+                total_usage_count=ai_calls + reprocesses,
+                ai_calls_since_date=ai_calls,
+                reprocesses_since_date=reprocesses,
             )
             return stats.model_dump(mode="json")
+
+    def parse_usage_from_date(self, value: str | None) -> date:
+        """Return a dashboard usage start date from UI input or today."""
+        if not value:
+            return datetime.now().date()
+        for fmt in ("%Y-%m-%d", "%d-%m-%Y"):
+            try:
+                return datetime.strptime(value, fmt).date()
+            except ValueError:
+                continue
+        raise ValueError(f"Invalid usage from date: {value}")
 
     def list_invoices(self, skip: int = 0, limit: int = 100) -> dict[str, Any]:
         """Return paginated invoice records for the invoice list page."""

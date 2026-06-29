@@ -283,6 +283,10 @@ class DashboardStats(BaseModel):
     total_pending_review: int = 0
     total_approved: int = 0
     total_rejected: int = 0
+    usage_from_date: str | None = None
+    total_usage_count: int = 0
+    ai_calls_since_date: int = 0
+    reprocesses_since_date: int = 0
 
 
 class AuditLogRecord(BaseModel):
