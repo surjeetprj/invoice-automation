@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from desktop_app.config import DEFAULT_GEMINI_MODEL
 from desktop_app.domain.parsing import parse_date, parse_decimal
@@ -234,18 +234,21 @@ class DomainHelperTests(unittest.TestCase):
 
         fake_client = Mock()
         fake_client.models.generate_content.return_value = FakeResponse()
+        fake_context = MagicMock()
+        fake_context.__enter__.return_value = fake_client
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "invoice.png"
             path.write_bytes(b"fake image bytes")
             with (
                 patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
                 patch("desktop_app.services.parsing.ai_client.GEMINI_MODEL", "test-visual-model"),
-                patch("google.genai.Client", return_value=fake_client),
+                patch("google.genai.Client", return_value=fake_context),
             ):
                 result = invoke_invoice_file_parser(path, "image/png", "invoice.png")
 
         self.assertEqual(result["invoice_number"], "VIS-1")
         fake_client.models.generate_content.assert_called_once()
+        fake_context.__exit__.assert_called_once()
         self.assertEqual(fake_client.models.generate_content.call_args.kwargs["model"], "test-visual-model")
 
     def test_text_ai_client_uses_configured_gemini_model(self) -> None:
@@ -254,16 +257,19 @@ class DomainHelperTests(unittest.TestCase):
 
         fake_client = Mock()
         fake_client.models.generate_content.return_value = Mock(parsed=InvoiceData(invoice_number="TXT-1"))
+        fake_context = MagicMock()
+        fake_context.__enter__.return_value = fake_client
 
         with (
             patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
             patch("desktop_app.services.parsing.ai_client.GEMINI_MODEL", "test-text-model"),
-            patch("google.genai.Client", return_value=fake_client),
+            patch("google.genai.Client", return_value=fake_context),
         ):
             result = invoke_invoice_parser("raw invoice text", "invoice.pdf")
 
         self.assertEqual(result["invoice_number"], "TXT-1")
         fake_client.models.generate_content.assert_called_once()
+        fake_context.__exit__.assert_called_once()
         self.assertEqual(fake_client.models.generate_content.call_args.kwargs["model"], "test-text-model")
 
     def test_text_ai_client_raises_clean_rate_limit_error(self) -> None:
@@ -272,10 +278,12 @@ class DomainHelperTests(unittest.TestCase):
 
         fake_client = Mock()
         fake_client.models.generate_content.side_effect = RuntimeError("429 quota exceeded. Please retry in 36.5s.")
+        fake_context = MagicMock()
+        fake_context.__enter__.return_value = fake_client
 
         with (
             patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
-            patch("google.genai.Client", return_value=fake_client),
+            patch("google.genai.Client", return_value=fake_context),
         ):
             with self.assertRaises(AIRateLimitError) as context:
                 invoke_invoice_parser("raw invoice text", "invoice.pdf")
@@ -284,6 +292,73 @@ class DomainHelperTests(unittest.TestCase):
         self.assertIn("Gemini quota or rate limit reached", message)
         self.assertIn("Retry after about 36.5 seconds", message)
         self.assertNotIn("Traceback", message)
+
+    def test_ai_response_helpers_validate_all_result_shapes(self) -> None:
+        """Gemini structured results should always pass through InvoiceData validation."""
+        from desktop_app.services.parsing.ai_client import invoice_response_to_dict, invoice_result_to_dict
+
+        class DumpableInvoice:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def model_dump(self):
+                return self.payload
+
+        self.assertEqual(invoice_result_to_dict(InvoiceData(invoice_number="P-1"))["invoice_number"], "P-1")
+        self.assertEqual(invoice_result_to_dict({"invoice_number": "D-1"})["invoice_number"], "D-1")
+        self.assertEqual(invoice_result_to_dict(DumpableInvoice({"invoice_number": "M-1"}))["invoice_number"], "M-1")
+        self.assertEqual(invoice_response_to_dict(Mock(parsed=None, text='{"invoice_number":"J-1"}'))["invoice_number"], "J-1")
+
+        with self.assertRaises(Exception):
+            invoice_result_to_dict(DumpableInvoice({"line_items": "not-a-list"}))
+
+    def test_visual_ai_client_rejects_invalid_files_before_client_creation(self) -> None:
+        """Visual parsing should fail fast for invalid files without opening Gemini."""
+        from desktop_app.services.parsing.ai_client import invoke_invoice_file_parser
+
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            missing_path = temp_path / "missing.png"
+            valid_path = temp_path / "invoice.png"
+            valid_path.write_bytes(b"fake image bytes")
+            large_path = temp_path / "large.pdf"
+            large_path.write_bytes(b"0" * (15 * 1024 * 1024 + 1))
+
+            with (
+                patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
+                patch("google.genai.Client") as client_factory,
+            ):
+                with self.assertRaises(FileNotFoundError):
+                    invoke_invoice_file_parser(missing_path, "image/png", "missing.png")
+                with self.assertRaises(ValueError):
+                    invoke_invoice_file_parser(temp_path, "image/png", "folder")
+                with self.assertRaises(ValueError):
+                    invoke_invoice_file_parser(valid_path, "image/bmp", "invoice.bmp")
+                with self.assertRaises(ValueError):
+                    invoke_invoice_file_parser(large_path, "application/pdf", "large.pdf")
+
+        client_factory.assert_not_called()
+
+    def test_rate_limit_detection_uses_structured_exception_details(self) -> None:
+        """Quota detection should use status/code attributes and flexible retry text."""
+        from desktop_app.services.parsing.ai_client import clean_ai_error_message, is_rate_limit_error
+
+        class StatusError(RuntimeError):
+            status = "RESOURCE_EXHAUSTED"
+
+        class CodeError(RuntimeError):
+            code = 429
+
+        self.assertTrue(is_rate_limit_error(StatusError("quota unavailable")))
+        self.assertTrue(is_rate_limit_error(CodeError("too many requests")))
+        self.assertIn(
+            "Retry after about 4.25 seconds",
+            clean_ai_error_message(RuntimeError("Please retry after 4.25 seconds"), "Gemini quota or rate limit reached"),
+        )
+        self.assertIn(
+            "Retry after about 7 seconds",
+            clean_ai_error_message(RuntimeError('retryDelay: "7s"'), "Gemini quota or rate limit reached"),
+        )
 
     def test_document_preview_accepts_image_path(self) -> None:
         """Image invoices should render into preview image paths."""
