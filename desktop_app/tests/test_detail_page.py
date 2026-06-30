@@ -317,6 +317,37 @@ class DetailPageLayoutTests(unittest.TestCase):
         finally:
             page.deleteLater()
 
+    def test_rejected_invoice_disables_all_review_actions(self) -> None:
+        """Rejected invoices are terminal in the review UI."""
+        page = DetailPage()
+        try:
+            page.load_invoice(
+                {
+                    "id": 6,
+                    "status": "Rejected",
+                    "confidence_score": 1.0,
+                    "extracted_data": {
+                        "invoice_number": "INV-6",
+                        "date": "01-04-2026",
+                        "vendor_name": "Vendor A",
+                        "total_taxable_amount": 100.0,
+                        "total_amount": 118.0,
+                        "line_items": [],
+                    },
+                    "validation": {"is_valid": True, "errors": [], "warnings": [], "issues": []},
+                }
+            )
+            self.assertFalse(page.approve_btn.isEnabled())
+            self.assertFalse(page.reject_btn.isEnabled())
+            self.assertFalse(page.corrections_btn.isEnabled())
+            self.assertFalse(page.reprocess_btn.isEnabled())
+            self.assertFalse(page.export_btn.isEnabled())
+
+            page.metadata.fields["vendor_name"].setText("Attempted Change")
+            self.assertFalse(page.corrections_btn.isEnabled())
+        finally:
+            page.deleteLater()
+
 
     def test_dashboard_usage_date_and_cards_render_stats(self) -> None:
         """Dashboard should expose a default date picker and render usage KPI cards."""

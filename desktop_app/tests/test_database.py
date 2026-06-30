@@ -275,6 +275,31 @@ class DatabasePersistenceTests(unittest.TestCase):
             self.assertEqual(invoice.reprocess_count, 1)
             self.assertEqual(invoice.ai_call_count, 1)
 
+    def test_rejected_invoice_blocks_review_and_reprocess_actions(self) -> None:
+        """Rejected invoices should be terminal at the workflow layer too."""
+        engine = self.make_engine()
+        Base.metadata.create_all(engine)
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = Invoice(filename="invoice.pdf", file_path="C:/tmp/invoice.pdf", status=InvoiceStatus.REJECTED)
+            db.add(invoice)
+            db.commit()
+            invoice_id = invoice.id
+
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            with self.assertRaises(ValueError):
+                workflow.submit_review(invoice_id, {"decision": "approve", "reviewer": "reviewer"})
+            with self.assertRaises(ValueError):
+                workflow.submit_review(
+                    invoice_id,
+                    {"decision": "save_corrections", "reviewer": "reviewer", "corrections": {"vendor_name": "Changed"}},
+                )
+            with self.assertRaises(ValueError):
+                workflow.submit_review(invoice_id, {"decision": "reject", "reviewer": "reviewer", "rejection_reason": "Again"})
+            with self.assertRaises(ValueError):
+                workflow.reprocess_invoice(invoice_id)
+
     def test_upload_invoice_emits_user_facing_progress_messages(self) -> None:
         """Upload processing should report friendly high-level progress messages."""
         engine = self.make_engine()

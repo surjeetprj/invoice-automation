@@ -15,7 +15,7 @@ from .tally.mapping import save_mappings
 
 AuditWriter = Callable[[int, str, str | None, str], None]
 
-REVIEWABLE_STATUSES = {InvoiceStatus.PENDING_REVIEW, InvoiceStatus.EXTRACTED, InvoiceStatus.REJECTED}
+REVIEWABLE_STATUSES = {InvoiceStatus.PENDING_REVIEW, InvoiceStatus.EXTRACTED}
 CORRECTION_STATUSES = REVIEWABLE_STATUSES | {InvoiceStatus.APPROVED, InvoiceStatus.POSTED}
 
 

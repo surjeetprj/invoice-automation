@@ -334,6 +334,8 @@ class DesktopWorkflow:
         logger.info("Reprocess requested for invoice #%s", invoice_id)
         with session_scope() as db:
             invoice = self.require_invoice(db, invoice_id)
+            if invoice.status == InvoiceStatus.REJECTED:
+                raise ValueError("Rejected invoices cannot be reprocessed.")
             path = Path(invoice.file_path)
             if not path.exists():
                 raise FileNotFoundError(f"Original file not found: {path}")
