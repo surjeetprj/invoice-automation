@@ -10,6 +10,7 @@ import requests
 
 from ..settings import get_tally_settings
 from ...domain.schemas import InvoiceData
+from .lookup import TallyVoucherDetails, build_posted_voucher_lookup_xml, parse_posted_voucher_details
 from .masters import (
     STOCK_GROUP_MASTER,
     STOCK_ITEM_MASTER,
@@ -157,6 +158,15 @@ class TallyClient:
         validate_inventory_item_posting(data)
         xml = build_inventory_purchase_voucher_xml(invoice_id, data)
         return parse_tally_response(self.post_xml(xml))
+
+    def fetch_voucher_details(self, last_voucher_id: str, company: str | None = None) -> TallyVoucherDetails | None:
+        """Fetch final Tally voucher fields for a posted voucher ID."""
+        for id_field in ("MASTERID", "VOUCHERID"):
+            xml = build_posted_voucher_lookup_xml(last_voucher_id, company=company, id_field=id_field)
+            details = parse_posted_voucher_details(self.post_xml(xml))
+            if details and details.voucher_number:
+                return details
+        return None
 
     def _preflight_masters(self, required: tuple[TallyMaster, ...]) -> TallyPreflight:
         """Check which of the requested masters do not exist in TallyPrime."""

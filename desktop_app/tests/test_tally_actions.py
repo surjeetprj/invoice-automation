@@ -28,6 +28,7 @@ class DummyWorkflow:
         self.inventory_missing: list[str] = []
         self.create_missing_masters: bool | None = None
         self.create_missing_inventory_masters: bool | None = None
+        self.warning: str | None = None
 
     def tally_preflight(self, invoice_id: int) -> dict[str, object]:
         return {"missing_masters": self.purchase_missing}
@@ -37,11 +38,15 @@ class DummyWorkflow:
 
     def post_invoice_to_tally(self, invoice_id: int, *, create_missing_masters: bool = False) -> dict[str, object]:
         self.create_missing_masters = create_missing_masters
-        return {"success": True, "message": "Invoice posted to TallyPrime.", "last_voucher_id": "101"}
+        result = {"success": True, "message": "Invoice posted to TallyPrime.", "purchase_voucher_number": "27", "last_voucher_id": "101"}
+        if self.warning:
+            result["warning"] = self.warning
+            result["purchase_voucher_number"] = None
+        return result
 
     def post_invoice_items_to_tally(self, invoice_id: int, *, create_missing_masters: bool = False) -> dict[str, object]:
         self.create_missing_inventory_masters = create_missing_masters
-        return {"success": True, "message": "Invoice items posted to TallyPrime.", "last_voucher_id": "202"}
+        return {"success": True, "message": "Invoice posted to TallyPrime.", "purchase_voucher_number": "28", "last_voucher_id": "202"}
 
     def sync_vendor_master_to_tally(self, invoice_id: int) -> dict[str, object]:
         return {"success": True, "message": "Vendor master synced to TallyPrime."}
@@ -86,7 +91,27 @@ class TallyActionsMessageTests(unittest.TestCase):
         self.assertFalse(window.workflow.create_missing_masters)
         self.assertEqual(window.opened_invoice_ids, [42])
         self.assert_dialogs_include_company(question, information, "Demo Company")
-        self.assertIn("Last voucher ID: 101", information.call_args.args[2])
+        self.assertIn("Purchase Voucher Number: 27", information.call_args.args[2])
+        self.assertNotIn("Last voucher ID", information.call_args.args[2])
+
+    def test_posting_lookup_warning_uses_warning_dialog(self) -> None:
+        window = DummyWindow("Demo Company")
+        window.workflow.warning = "Purchase Voucher Number could not be fetched: lookup unavailable"
+        with (
+            patch("desktop_app.ui.tally_actions.QMessageBox.question", return_value=QMessageBox.StandardButton.Yes),
+            patch("desktop_app.ui.tally_actions.QMessageBox.information") as information,
+            patch("desktop_app.ui.tally_actions.QMessageBox.warning") as warning,
+        ):
+            window.post_invoice_to_tally(42)
+
+        information.assert_not_called()
+        warning.assert_called_once()
+        message = warning.call_args.args[2]
+        self.assertIn("Invoice posted to TallyPrime.", message)
+        self.assertIn("Company: Demo Company", message)
+        self.assertIn("Purchase Voucher Number could not be fetched", message)
+        self.assertNotIn("Last voucher ID", message)
+        self.assertEqual(window.opened_invoice_ids, [42])
 
     def test_ledger_only_missing_master_confirmation_includes_selected_company(self) -> None:
         window = DummyWindow("Demo Company")
@@ -112,7 +137,8 @@ class TallyActionsMessageTests(unittest.TestCase):
         self.assertFalse(window.workflow.create_missing_inventory_masters)
         self.assertEqual(window.opened_invoice_ids, [42])
         self.assert_dialogs_include_company(question, information, "Demo Company")
-        self.assertIn("Last voucher ID: 202", information.call_args.args[2])
+        self.assertIn("Purchase Voucher Number: 28", information.call_args.args[2])
+        self.assertNotIn("Last voucher ID", information.call_args.args[2])
 
     def test_item_wise_missing_master_confirmation_includes_selected_company(self) -> None:
         window = DummyWindow("Demo Company")

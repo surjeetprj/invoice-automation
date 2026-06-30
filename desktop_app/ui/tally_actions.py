@@ -27,13 +27,19 @@ class TallyActionsMixin:
         return "the selected company"
 
     def tally_success_message(self, result: dict[str, Any], fallback: str, company: str) -> str:
-        """Append selected-company and voucher context to a TallyPrime success message."""
+        """Return a concise TallyPrime voucher success message."""
         message = str(result.get("message") or fallback).strip()
-        last_voucher_id = str(result.get("last_voucher_id") or "").strip()
+        purchase_voucher_number = str(result.get("purchase_voucher_number") or "").strip()
         details = [f"Company: {company}"]
-        if last_voucher_id:
-            details.append(f"Last voucher ID: {last_voucher_id}")
+        if purchase_voucher_number:
+            details.append(f"Purchase Voucher Number: {purchase_voucher_number}")
         return f"{message}\n\n" + "\n".join(details)
+
+    def tally_warning_message(self, result: dict[str, Any], fallback: str, company: str) -> str:
+        """Return a warning message when posting succeeded but voucher lookup did not."""
+        message = self.tally_success_message(result, fallback, company)
+        warning = str(result.get("warning") or "").strip()
+        return f"{message}\n\n{warning}" if warning else message
 
     def post_invoice_to_tally(self, invoice_id: int) -> None:
         """Preflight and post an approved invoice to local TallyPrime."""
@@ -57,7 +63,11 @@ class TallyActionsMixin:
                 return
 
             def posted(post_result: dict[str, Any]) -> None:
-                QMessageBox.information(self, "TallyPrime", self.tally_success_message(post_result, "Invoice posted to TallyPrime.", company))
+                message = self.tally_warning_message(post_result, "Invoice posted to TallyPrime.", company)
+                if post_result.get("warning"):
+                    QMessageBox.warning(self, "TallyPrime", message)
+                else:
+                    QMessageBox.information(self, "TallyPrime", message)
                 self.open_invoice(invoice_id)
 
             self.run_task(
@@ -89,7 +99,11 @@ class TallyActionsMixin:
                 return
 
             def posted(post_result: dict[str, Any]) -> None:
-                QMessageBox.information(self, "TallyPrime", self.tally_success_message(post_result, "Invoice items posted to TallyPrime.", company))
+                message = self.tally_warning_message(post_result, "Invoice posted to TallyPrime.", company)
+                if post_result.get("warning"):
+                    QMessageBox.warning(self, "TallyPrime", message)
+                else:
+                    QMessageBox.information(self, "TallyPrime", message)
                 self.open_invoice(invoice_id)
 
             self.run_task(

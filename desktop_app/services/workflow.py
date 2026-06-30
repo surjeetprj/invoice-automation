@@ -495,6 +495,7 @@ class DesktopWorkflow:
             if not voucher_response.success:
                 raise ValueError(f"TallyPrime voucher posting failed: {voucher_response.summary}")
             invoice.status = InvoiceStatus.POSTED
+            purchase_voucher_number, lookup_warning = self.lookup_posted_purchase_voucher_number(db, invoice, client, voucher_response)
             db.commit()
             self.log(db, invoice.id, f"Pushed to TallyPrime ({voucher_response.summary}) - status set to Posted")
             return {
@@ -502,6 +503,8 @@ class DesktopWorkflow:
                 "message": "Invoice posted to TallyPrime.",
                 "tally_response": voucher_response.summary,
                 "last_voucher_id": voucher_response.last_voucher_id,
+                "purchase_voucher_number": purchase_voucher_number,
+                "warning": lookup_warning,
             }
 
     def post_invoice_items_to_tally(self, invoice_id: int, *, create_missing_masters: bool = False) -> dict[str, Any]:
@@ -554,14 +557,48 @@ class DesktopWorkflow:
             if not voucher_response.success:
                 raise ValueError(f"TallyPrime item voucher posting failed: {voucher_response.summary}")
             invoice.status = InvoiceStatus.POSTED
+            purchase_voucher_number, lookup_warning = self.lookup_posted_purchase_voucher_number(db, invoice, client, voucher_response)
             db.commit()
             self.log(db, invoice.id, f"Pushed item-wise to TallyPrime ({voucher_response.summary}) - status set to Posted")
             return {
                 "success": True,
-                "message": "Invoice items posted to TallyPrime.",
+                "message": "Invoice posted to TallyPrime.",
                 "tally_response": voucher_response.summary,
                 "last_voucher_id": voucher_response.last_voucher_id,
+                "purchase_voucher_number": purchase_voucher_number,
+                "warning": lookup_warning,
             }
+
+    def lookup_posted_purchase_voucher_number(self, db, invoice: Invoice, client: TallyClient, voucher_response) -> tuple[str | None, str | None]:
+        """Best-effort lookup for Tally's final Purchase voucher number after posting."""
+        last_voucher_id = str(voucher_response.last_voucher_id or "").strip()
+        if not last_voucher_id:
+            warning = "Purchase Voucher Number could not be fetched because Tally did not return a last voucher ID."
+            self.log(db, invoice.id, "TallyPrime voucher lookup skipped - Last voucher ID unavailable", warning)
+            return None, warning
+
+        try:
+            company = get_tally_settings().tally_company.strip()
+            details = client.fetch_voucher_details(last_voucher_id, company=company or None)
+        except Exception as exc:
+            warning = f"Purchase Voucher Number could not be fetched: {exc}"
+            logger.info("Tally voucher lookup failed for invoice #%s last_voucher_id=%s: %s", invoice.id, last_voucher_id, exc)
+            self.log(db, invoice.id, f"TallyPrime voucher lookup failed - Last voucher ID: {last_voucher_id}", warning)
+            return None, warning
+
+        purchase_voucher_number = str(getattr(details, "voucher_number", None) or "").strip() if details else ""
+        if not purchase_voucher_number:
+            warning = "Purchase Voucher Number could not be fetched from Tally voucher lookup response."
+            self.log(db, invoice.id, f"TallyPrime voucher lookup returned no Purchase Voucher Number - Last voucher ID: {last_voucher_id}", warning)
+            return None, warning
+
+        self.log(
+            db,
+            invoice.id,
+            f"TallyPrime Purchase Voucher Number: {purchase_voucher_number}; Last voucher ID: {last_voucher_id}",
+            "TallyPrime voucher lookup",
+        )
+        return purchase_voucher_number, None
 
     def sync_vendor_master_to_tally(self, invoice_id: int) -> dict[str, Any]:
         """Update the TallyPrime vendor ledger with extracted invoice vendor details."""

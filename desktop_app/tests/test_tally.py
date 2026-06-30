@@ -15,6 +15,11 @@ from desktop_app.domain.schemas import InvoiceData, LineItem, TaxDetail, Validat
 from desktop_app.services.tally import TallyClient
 from desktop_app.services.settings import TallySettings
 from desktop_app.services.tally.client import TallyPreflight, annotate_tally_response, merge_tally_responses
+from desktop_app.services.tally.lookup import (
+    TallyVoucherDetails,
+    build_posted_voucher_lookup_xml,
+    parse_posted_voucher_details,
+)
 from desktop_app.services.tally.masters import (
     build_inventory_stock_items_xml,
     TallyMaster,
@@ -415,6 +420,92 @@ class TallyServiceTests(unittest.TestCase):
         self.assertIn("A & B Services", names)
         self.assertIn("Invalid  Control", names)
 
+    def test_posted_voucher_lookup_xml_filters_by_master_id(self) -> None:
+        """Voucher lookup should request the posted voucher by Tally master ID."""
+        xml = build_posted_voucher_lookup_xml("101", company="Runtime Company").decode("utf-8")
+
+        self.assertIn("<TYPE>Voucher</TYPE>", xml)
+        self.assertIn("<SVCURRENTCOMPANY>Runtime Company</SVCURRENTCOMPANY>", xml)
+        self.assertIn("<FETCH>VOUCHERNUMBER,VOUCHERTYPENAME,DATE,PARTYINVNO,REFERENCE,MASTERID,VOUCHERID</FETCH>", xml)
+        self.assertIn("<FILTERS>InvoiceAIVoucherByMasterId</FILTERS>", xml)
+        self.assertIn("$MASTERID = 101", xml)
+
+        voucher_id_xml = build_posted_voucher_lookup_xml("101", company="Runtime Company", id_field="VOUCHERID").decode("utf-8")
+        self.assertIn("$VOUCHERID = 101", voucher_id_xml)
+
+    def test_parse_posted_voucher_details_reads_purchase_voucher_number(self) -> None:
+        """Voucher lookup parser should extract Tally's final purchase voucher number."""
+        details = parse_posted_voucher_details(
+            """
+            <ENVELOPE><BODY><DATA><COLLECTION>
+              <VOUCHER>
+                <DATE>20260630</DATE>
+                <VOUCHERTYPENAME>Purchase</VOUCHERTYPENAME>
+                <VOUCHERNUMBER>27</VOUCHERNUMBER>
+                <PARTYINVNO>SUP-1</PARTYINVNO>
+                <REFERENCE>SUP-1</REFERENCE>
+                <MASTERID>101</MASTERID>
+              </VOUCHER>
+            </COLLECTION></DATA></BODY></ENVELOPE>
+            """
+        )
+
+        self.assertIsNotNone(details)
+        assert details is not None
+        self.assertEqual(details.voucher_number, "27")
+        self.assertEqual(details.voucher_type, "Purchase")
+        self.assertEqual(details.party_invoice_number, "SUP-1")
+        self.assertEqual(details.master_id, "101")
+
+    def test_parse_posted_voucher_details_handles_empty_or_bad_response(self) -> None:
+        """Bad voucher lookup responses should not crash posting."""
+        self.assertIsNone(parse_posted_voucher_details("not xml"))
+        self.assertIsNone(parse_posted_voucher_details("<ENVELOPE><BODY /></ENVELOPE>"))
+
+    def test_parse_posted_voucher_details_ignores_cmpinfo_voucher_count(self) -> None:
+        """Tally responses include CMPINFO voucher counts before the actual voucher object."""
+        details = parse_posted_voucher_details(
+            """
+            <ENVELOPE><BODY>
+              <DESC><CMPINFO><VOUCHER>16</VOUCHER></CMPINFO></DESC>
+              <DATA><COLLECTION>
+                <VOUCHER VCHTYPE="Purchase" OBJVIEW="Invoice Voucher View">
+                  <VOUCHERTYPENAME>Purchase</VOUCHERTYPENAME>
+                  <VOUCHERNUMBER>PUR/047</VOUCHERNUMBER>
+                  <REFERENCE TYPE="String">SIS/26-27/013</REFERENCE>
+                  <PARTYINVNO TYPE="String">SIS/26-27/013</PARTYINVNO>
+                  <MASTERID TYPE="Number"> 47</MASTERID>
+                  <VOUCHERID TYPE="Number"> 57</VOUCHERID>
+                </VOUCHER>
+              </COLLECTION></DATA>
+            </BODY></ENVELOPE>
+            """
+        )
+
+        self.assertIsNotNone(details)
+        assert details is not None
+        self.assertEqual(details.voucher_number, "PUR/047")
+        self.assertEqual(details.master_id, "47")
+
+    def test_tally_client_retries_voucher_lookup_with_voucher_id(self) -> None:
+        """LASTVCHID may match Tally's voucher ID rather than the master ID filter."""
+        client = TallyClient()
+        empty_response = "<ENVELOPE><BODY><DATA><COLLECTION /></DATA></BODY></ENVELOPE>"
+        voucher_response = """
+        <ENVELOPE><BODY><DATA><COLLECTION>
+          <VOUCHER><VOUCHERNUMBER>27</VOUCHERNUMBER><VOUCHERID>44</VOUCHERID></VOUCHER>
+        </COLLECTION></DATA></BODY></ENVELOPE>
+        """
+        with patch.object(client, "post_xml", side_effect=[empty_response, voucher_response]) as post_xml:
+            details = client.fetch_voucher_details("44", company="Runtime Company")
+
+        self.assertIsNotNone(details)
+        assert details is not None
+        self.assertEqual(details.voucher_number, "27")
+        self.assertEqual(post_xml.call_count, 2)
+        self.assertIn(b"$MASTERID = 44", post_xml.call_args_list[0].args[0])
+        self.assertIn(b"$VOUCHERID = 44", post_xml.call_args_list[1].args[0])
+
     def test_build_collection_export_xml_for_unit(self) -> None:
         """Collection export XML for Unit master type should fetch both NAME and FORMALNAME."""
         from desktop_app.services.tally.masters import build_collection_export_xml
@@ -560,10 +651,13 @@ class TallyServiceTests(unittest.TestCase):
                 client.sync_vendor_master.return_value = TallyResponse(success=True, altered=1)
                 client.sync_system_ledgers.return_value = TallyResponse(success=True, altered=4)
                 client.post_purchase_voucher.return_value = TallyResponse(success=True, created=1, last_voucher_id="101")
+                client.fetch_voucher_details.return_value = TallyVoucherDetails(voucher_number="27", master_id="101")
                 result = workflow.post_invoice_to_tally(invoice_id)
 
         self.assertTrue(result["success"])
         self.assertEqual(result["last_voucher_id"], "101")
+        self.assertEqual(result["purchase_voucher_number"], "27")
+        self.assertIsNone(result["warning"])
         with Session(engine, expire_on_commit=False, future=True) as db:
             invoice = db.get(Invoice, invoice_id)
             self.assertIsNotNone(invoice)
@@ -571,6 +665,7 @@ class TallyServiceTests(unittest.TestCase):
             self.assertEqual(invoice.status, InvoiceStatus.POSTED)
             logs = db.scalars(select(AuditLog).where(AuditLog.invoice_id == invoice_id)).all()
             self.assertTrue(any("Pushed to TallyPrime" in log.action for log in logs))
+            self.assertTrue(any("Purchase Voucher Number: 27" in log.action and "Last voucher ID: 101" in log.action for log in logs))
 
     def test_workflow_posts_itemwise_invoice_and_marks_posted(self) -> None:
         """Successful inventory Tally posting should mark the invoice Posted and audit it."""
@@ -587,10 +682,13 @@ class TallyServiceTests(unittest.TestCase):
                 client.sync_system_ledgers.return_value = TallyResponse(success=True, altered=4)
                 client.sync_inventory_item_masters.return_value = TallyResponse(success=True, altered=1)
                 client.post_inventory_purchase_voucher.return_value = TallyResponse(success=True, created=1, last_voucher_id="202")
+                client.fetch_voucher_details.return_value = TallyVoucherDetails(voucher_number="28", master_id="202")
                 result = workflow.post_invoice_items_to_tally(invoice_id)
 
         self.assertTrue(result["success"])
         self.assertEqual(result["last_voucher_id"], "202")
+        self.assertEqual(result["purchase_voucher_number"], "28")
+        self.assertIsNone(result["warning"])
         with Session(engine, expire_on_commit=False, future=True) as db:
             invoice = db.get(Invoice, invoice_id)
             self.assertIsNotNone(invoice)
@@ -598,6 +696,36 @@ class TallyServiceTests(unittest.TestCase):
             self.assertEqual(invoice.status, InvoiceStatus.POSTED)
             logs = db.scalars(select(AuditLog).where(AuditLog.invoice_id == invoice_id)).all()
             self.assertTrue(any("item-wise to TallyPrime" in log.action for log in logs))
+            self.assertTrue(any("Purchase Voucher Number: 28" in log.action and "Last voucher ID: 202" in log.action for log in logs))
+
+    def test_workflow_keeps_invoice_posted_when_purchase_voucher_lookup_fails(self) -> None:
+        """Voucher lookup failure should not undo a successful Tally posting."""
+        engine = self.make_engine()
+        invoice_id = self.create_invoice(engine)
+        workflow = DesktopWorkflow()
+        workflow._initialized = True
+        with patch("desktop_app.services.workflow.session_scope", side_effect=lambda: Session(engine, expire_on_commit=False, future=True)):
+            with patch("desktop_app.services.workflow.TallyClient") as client_cls:
+                client = client_cls.return_value
+                client.fetch_company_names.return_value = {"Runtime Company"}
+                client.check_connection.return_value = None
+                client.preflight_purchase_invoice.return_value = TallyPreflight((), ())
+                client.sync_vendor_master.return_value = TallyResponse(success=True, altered=1)
+                client.sync_system_ledgers.return_value = TallyResponse(success=True, altered=4)
+                client.post_purchase_voucher.return_value = TallyResponse(success=True, created=1, last_voucher_id="101")
+                client.fetch_voucher_details.side_effect = RuntimeError("lookup unavailable")
+                result = workflow.post_invoice_to_tally(invoice_id)
+
+        self.assertTrue(result["success"])
+        self.assertIsNone(result["purchase_voucher_number"])
+        self.assertIn("Purchase Voucher Number could not be fetched", result["warning"])
+        with Session(engine, expire_on_commit=False, future=True) as db:
+            invoice = db.get(Invoice, invoice_id)
+            self.assertIsNotNone(invoice)
+            assert invoice is not None
+            self.assertEqual(invoice.status, InvoiceStatus.POSTED)
+            logs = db.scalars(select(AuditLog).where(AuditLog.invoice_id == invoice_id)).all()
+            self.assertTrue(any("voucher lookup failed" in log.action and "Last voucher ID: 101" in log.action for log in logs))
 
     def test_workflow_requires_confirmation_for_missing_masters(self) -> None:
         """Missing masters should be reported before creating them."""
