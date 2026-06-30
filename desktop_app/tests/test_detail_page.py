@@ -38,7 +38,7 @@ class DetailPageLayoutTests(unittest.TestCase):
             expected_fields = {field for fields in FIELD_GROUPS.values() for field in fields}
             self.assertEqual(expected_fields, set(page.metadata.fields))
             self.assertIs(page.metadata.line_items, page.line_items)
-            self.assertEqual([page.tabs.tabText(index) for index in range(page.tabs.count())], ["Metadata", "Validation", "Audit Logs", "Raw Markdown"])
+            self.assertEqual([page.tabs.tabText(index) for index in range(page.tabs.count())], ["Metadata", "Validation", "Audit Logs"])
             self.assertEqual(page.splitter.widget(1).minimumWidth(), 360)
             labels = [action.text() for action in page.export_btn.menu().actions()]
             self.assertIn("\u2715 JSON", labels)
@@ -194,7 +194,7 @@ class DetailPageLayoutTests(unittest.TestCase):
                 result = task()
                 callback(result)
 
-            def load_saved_invoice(self, invoice):
+            def corrections_saved(self, invoice):
                 self.loaded_invoice = invoice
 
         window = DummyWindow()
@@ -205,6 +205,30 @@ class DetailPageLayoutTests(unittest.TestCase):
         self.assertEqual(window.workflow.payload["reviewer"], "reviewer")
         self.assertEqual(window.workflow.payload["corrections"], {"vendor_name": "Corrected Vendor"})
         self.assertEqual(window.loaded_invoice, {"id": 5})
+
+    def test_corrections_saved_skips_document_reload_and_confirms(self) -> None:
+        """Correction saves should refresh data without re-rendering the document preview."""
+
+        class FakeDetail:
+            def __init__(self) -> None:
+                self.loaded = []
+
+            def load_invoice(self, invoice, *, reload_document=True):
+                self.loaded.append((invoice, reload_document))
+
+        class DummyWindow:
+            def __init__(self) -> None:
+                self.detail = FakeDetail()
+                self.current_document_invoice_id = None
+
+        window = DummyWindow()
+        invoice = {"id": 6, "status": "Pending_Review"}
+        with patch("desktop_app.ui.main_window.QMessageBox.information") as information:
+            MainWindow.corrections_saved(window, invoice)
+
+        self.assertEqual(window.current_document_invoice_id, 6)
+        self.assertEqual(window.detail.loaded, [(invoice, False)])
+        information.assert_called_once_with(window, "Corrections Saved", "Corrections saved successfully.")
 
     def test_approve_and_reject_use_returned_invoice_without_reopening(self) -> None:
         """Review actions should render the returned invoice instead of reloading it."""
@@ -286,6 +310,27 @@ class DetailPageLayoutTests(unittest.TestCase):
 
         self.assertEqual(window.detail.busy_states, [False])
         self.assertEqual(window.errors, ["Could not save review"])
+
+    def test_load_invoice_can_skip_document_reload(self) -> None:
+        """Refreshing saved corrections should not have to reload the PDF/image preview."""
+        page = DetailPage()
+        requested = []
+        try:
+            invoice = {
+                "id": 10,
+                "status": "Pending_Review",
+                "extracted_data": {},
+                "validation": {"issues": []},
+            }
+            page.pdf_requested.connect(requested.append)
+
+            page.load_invoice(invoice, reload_document=False)
+            self.assertEqual(requested, [])
+
+            page.load_invoice(invoice)
+            self.assertEqual(requested, [10])
+        finally:
+            page.deleteLater()
 
     def test_corrections_button_reenables_after_saved_invoice_is_edited_again(self) -> None:
         """After a saved correction reloads, another edit should enable submit again."""

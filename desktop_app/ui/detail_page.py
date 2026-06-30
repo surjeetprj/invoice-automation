@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSplitter,
     QTabWidget,
-    QTextEdit,
     QMenu,
     QToolButton,
     QVBoxLayout,
@@ -328,11 +327,6 @@ class DetailPage(QWidget):
         self.validation = ValidationPane()
         self.audit = AuditPane()
 
-        # Raw Markdown comparison view
-        self.raw_text_pane = QTextEdit()
-        self.raw_text_pane.setReadOnly(True)
-        self.raw_text_pane.setObjectName("rawTextPane")
-
         self.metadata.changed.connect(self.mark_dirty)
         self.line_items.changed.connect(self.mark_dirty)
         self.tally_mappings.changed.connect(self.mark_dirty)
@@ -342,7 +336,6 @@ class DetailPage(QWidget):
         self.tabs.addTab(self.metadata, "Metadata")
         self.tabs.addTab(self.validation, "Validation")
         self.tabs.addTab(self.audit, "Audit Logs")
-        self.tabs.addTab(self.raw_text_pane, "Raw Markdown")
         self.tabs.currentChanged.connect(self.tab_changed)
 
         pdf_panel = QFrame()
@@ -397,7 +390,7 @@ class DetailPage(QWidget):
             footer.addWidget(button)
         layout.addLayout(footer)
 
-    def load_invoice(self, invoice: dict[str, Any]) -> None:
+    def load_invoice(self, invoice: dict[str, Any], *, reload_document: bool = True) -> None:
         """Populate the detail page from an invoice record."""
         self.invoice = invoice
         self.original_data = copy.deepcopy(invoice.get("extracted_data") or {})
@@ -410,9 +403,6 @@ class DetailPage(QWidget):
         summary_parts.append(f"AI calls: {int(invoice.get('ai_call_count') or 0)}")
         summary_parts.append(f"Reprocesses: {int(invoice.get('reprocess_count') or 0)}")
         self.summary.setText(" | ".join(summary_parts))
-
-        # Load raw markdown if present
-        self.raw_text_pane.setText(invoice.get("raw_markdown") or "No raw markdown available.")
 
         # Check for AI parsing errors
         issues = invoice.get("validation", {}).get("issues") or []
@@ -436,7 +426,8 @@ class DetailPage(QWidget):
         self.dirty = False
         self.review_action_busy = False
         self.sync_actions()
-        self.pdf_requested.emit(int(invoice["id"]))
+        if reload_document:
+            self.pdf_requested.emit(int(invoice["id"]))
 
     def set_pdf_loading(self, pdf_path) -> None:
         """Show PDF loading state."""

@@ -332,12 +332,18 @@ class MainWindow(SettingsActionsMixin, TallyActionsMixin, QMainWindow):
     def submit_corrections(self, invoice_id: int, corrections: dict[str, Any]) -> None:
         """Save manual corrections without approving the invoice."""
         payload = {"decision": "save_corrections", "reviewer": self.reviewer_name(), "corrections": corrections}
-        self.run_task(lambda: self.workflow.submit_review(invoice_id, payload), self.load_saved_invoice)
+        self.run_task(lambda: self.workflow.submit_review(invoice_id, payload), self.corrections_saved)
 
     def load_saved_invoice(self, invoice: dict[str, Any]) -> None:
         """Refresh the detail page from a just-saved invoice payload."""
         self.current_document_invoice_id = int(invoice["id"])
         self.detail.load_invoice(invoice)
+
+    def corrections_saved(self, invoice: dict[str, Any]) -> None:
+        """Refresh corrected invoice data without reloading the document preview."""
+        self.current_document_invoice_id = int(invoice["id"])
+        self.detail.load_invoice(invoice, reload_document=False)
+        QMessageBox.information(self, "Corrections Saved", "Corrections saved successfully.")
 
     def review_action_failed(self, message: str) -> None:
         """Restore review actions after a failed approve/reject task."""
