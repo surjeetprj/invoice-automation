@@ -52,10 +52,16 @@ class ExporterTests(unittest.TestCase):
         self.assertTrue(filename.endswith("_tally.xml"))
         self.assertIn('VCHTYPE="Purchase"', xml)
         self.assertIn("<VOUCHERTYPENAME>Purchase</VOUCHERTYPENAME>", xml)
+        self.assertIn("<PERSISTEDVIEW>Accounting Voucher View</PERSISTEDVIEW>", xml)
+        self.assertIn("<ISINVOICE>No</ISINVOICE>", xml)
+        self.assertIn("<PARTYINVNO>PI-1</PARTYINVNO>", xml)
+        self.assertIn('<PARTYINVDATE TYPE="Date">20260501</PARTYINVDATE>', xml)
         self.assertIn("<LEDGERNAME>Vendor Pvt Ltd</LEDGERNAME>", xml)
         self.assertIn("<LEDGERNAME>Purchase Account</LEDGERNAME>", xml)
         self.assertIn("<LEDGERNAME>Input CGST</LEDGERNAME>", xml)
         self.assertIn("<LEDGERNAME>Input SGST</LEDGERNAME>", xml)
+        self.assertNotIn("<ALLINVENTORYENTRIES.LIST>", xml)
+        self.assertNotIn("<STOCKITEMNAME>Service</STOCKITEMNAME>", xml)
 
     def test_json_export_keeps_previous_line_item_shape(self) -> None:
         """JSON file export should not expose the TallyPrime-only item_name field."""

@@ -165,6 +165,16 @@ class DomainHelperTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_upload_file(path)
 
+    def test_upload_validation_rejects_directories_with_supported_suffixes(self) -> None:
+        """Upload validation should reject folders before extension or size routing."""
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "invoice.pdf"
+            path.mkdir()
+            with self.assertRaises(ValueError):
+                validate_upload_file(path)
+            with self.assertRaises(ValueError):
+                classify_document(path)
+
     def test_mime_type_detection_handles_supported_uploads(self) -> None:
         """Supported upload extensions should map to Gemini MIME types."""
         self.assertEqual(mime_type_for_path(Path("invoice.pdf")), "application/pdf")

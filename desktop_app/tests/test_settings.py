@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Tests for runtime desktop settings persistence."""
 
+import importlib
 import json
 import unittest
 from pathlib import Path
@@ -14,6 +15,45 @@ from desktop_app.services.settings import get_tally_settings, get_tally_settings
 
 class RuntimeSettingsTests(unittest.TestCase):
     """Exercise runtime JSON settings used by customer installs."""
+
+    def test_config_import_does_not_create_runtime_directories(self) -> None:
+        """Config constants should be importable without filesystem writes."""
+        with patch("pathlib.Path.mkdir") as mkdir:
+            import desktop_app.config as config
+
+            importlib.reload(config)
+
+        mkdir.assert_not_called()
+
+    def test_ensure_runtime_dirs_creates_expected_directories(self) -> None:
+        """Runtime directory creation should be explicit and centralized."""
+        with TemporaryDirectory() as temp_dir:
+            runtime_dir = Path(temp_dir) / "runtime"
+            with (
+                patch("desktop_app.config.RUNTIME_DIR", runtime_dir),
+                patch("desktop_app.config.UPLOAD_DIR", runtime_dir / "uploads"),
+                patch("desktop_app.config.EXPORT_DIR", runtime_dir / "exports"),
+                patch("desktop_app.config.LOG_DIR", runtime_dir / "logs"),
+            ):
+                settings.config.ensure_runtime_dirs()
+
+            self.assertTrue(runtime_dir.is_dir())
+            self.assertTrue((runtime_dir / "uploads").is_dir())
+            self.assertTrue((runtime_dir / "exports").is_dir())
+            self.assertTrue((runtime_dir / "logs").is_dir())
+
+    def test_configure_logging_ensures_runtime_directories(self) -> None:
+        """Logging setup should bootstrap runtime folders before opening the log file."""
+        from desktop_app import app
+
+        with (
+            patch("desktop_app.app.ensure_runtime_dirs") as ensure,
+            patch("logging.FileHandler"),
+            patch("logging.basicConfig"),
+        ):
+            app.configure_logging()
+
+        ensure.assert_called_once()
 
     def test_defaults_load_when_settings_file_is_absent(self) -> None:
         """Missing settings.json should fall back to config/.env defaults."""

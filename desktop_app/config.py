@@ -33,8 +33,12 @@ UPLOAD_DIR = RUNTIME_DIR / "uploads"
 EXPORT_DIR = RUNTIME_DIR / "exports"
 LOG_DIR = RUNTIME_DIR / "logs"
 
-for directory in (RUNTIME_DIR, UPLOAD_DIR, EXPORT_DIR, LOG_DIR):
-    directory.mkdir(parents=True, exist_ok=True)
+
+def ensure_runtime_dirs() -> None:
+    """Create runtime directories when the app is starting or writing data."""
+    for directory in (RUNTIME_DIR, UPLOAD_DIR, EXPORT_DIR, LOG_DIR):
+        directory.mkdir(parents=True, exist_ok=True)
+
 
 DATABASE_URL = os.getenv("DESKTOP_DATABASE_URL", f"sqlite:///{(RUNTIME_DIR / 'invoices.db').as_posix()}")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")

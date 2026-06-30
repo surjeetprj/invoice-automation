@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from sqlalchemy import func, select
 
-from ..config import DUPLICATE_CHECK_ENABLED, InvoiceStatus, UPLOAD_DIR
+from ..config import DUPLICATE_CHECK_ENABLED, InvoiceStatus, UPLOAD_DIR, ensure_runtime_dirs
 from ..db.models import AuditLog, Invoice
 from ..db.repository import (
     invoice_data_from_invoice,
@@ -65,6 +65,7 @@ class DesktopWorkflow:
         """Initialize the local desktop database."""
         if getattr(self, "_initialized", False):
             return
+        ensure_runtime_dirs()
         logger.info("Initializing desktop database")
         init_db()
         with session_scope() as db:

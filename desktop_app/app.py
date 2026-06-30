@@ -10,10 +10,10 @@ from PySide6.QtWidgets import QApplication
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from desktop_app.config import LOG_DIR
+    from desktop_app.config import LOG_DIR, ensure_runtime_dirs
     from desktop_app.ui.main_window import MainWindow
 else:
-    from .config import LOG_DIR
+    from .config import LOG_DIR, ensure_runtime_dirs
     from .ui.main_window import MainWindow
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def configure_logging() -> None:
     """Configure console and file logging for the desktop application."""
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_runtime_dirs()
     log_file = LOG_DIR / "desktop_app.log"
     logging.basicConfig(
         level=logging.INFO,

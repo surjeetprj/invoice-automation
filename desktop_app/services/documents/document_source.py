@@ -58,6 +58,8 @@ def validate_upload_file(path: Path) -> None:
     """Validate existence, extension, and size for invoice uploads."""
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
+    if not path.is_file():
+        raise ValueError(f"Upload path is not a file: {path}")
     if path.suffix.lower() not in ALLOWED_EXTENSIONS:
         supported = ", ".join(sorted(ALLOWED_EXTENSIONS))
         raise ValueError(f"Only invoice files with these extensions are supported: {supported}")

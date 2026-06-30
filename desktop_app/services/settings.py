@@ -77,16 +77,19 @@ def save_tally_settings(payload: dict[str, Any]) -> TallySettings:
 
     content = load_settings_file()
     content["tally"] = {"global": global_settings}
-    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if SETTINGS_FILE.parent == config.RUNTIME_DIR:
+        config.ensure_runtime_dirs()
+    else:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_FILE.write_text(json.dumps(content, indent=2, sort_keys=True), encoding="utf-8")
     return settings_from_document(content["tally"])
 
 
 def load_settings_file() -> dict[str, Any]:
-    """Return the runtime settings file content, or an empty object if absent."""
-    if not SETTINGS_FILE.exists():
-        return {}
+    """Return the runtime settings file content, or an empty object if absent/inaccessible."""
     try:
+        if not SETTINGS_FILE.exists():
+            return {}
         data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
