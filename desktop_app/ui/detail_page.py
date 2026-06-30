@@ -296,6 +296,7 @@ class DetailPage(QWidget):
         self.original_data: dict[str, Any] = {}
         self.original_mappings: list[dict[str, Any]] = []
         self.dirty = False
+        self.review_action_busy = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)
         header = QHBoxLayout()
@@ -433,6 +434,7 @@ class DetailPage(QWidget):
         self.validation.set_validation(invoice.get("validation"))
         self.audit.set_logs([])
         self.dirty = False
+        self.review_action_busy = False
         self.sync_actions()
         self.pdf_requested.emit(int(invoice["id"]))
 
@@ -455,6 +457,10 @@ class DetailPage(QWidget):
 
     def sync_actions(self) -> None:
         """Enable or disable review actions based on invoice state."""
+        if self.review_action_busy:
+            for button in (self.approve_btn, self.corrections_btn, self.reject_btn, self.reprocess_btn, self.export_btn):
+                button.setEnabled(False)
+            return
         status = (self.invoice or {}).get("status")
         reviewable = status in {"Pending_Review", "Extracted"}
         exportable = status in {"Approved", "Posted"}
@@ -465,6 +471,11 @@ class DetailPage(QWidget):
         self.corrections_btn.setEnabled(self.invoice is not None and not rejected and self.dirty and valid)
         self.reprocess_btn.setEnabled(self.invoice is not None and not rejected)
         self.export_btn.setEnabled(exportable)
+
+    def set_review_action_busy(self, is_busy: bool) -> None:
+        """Temporarily disable review actions while a review task is saving."""
+        self.review_action_busy = is_busy
+        self.sync_actions()
 
     def invoice_id(self) -> int | None:
         """Return the current invoice ID, if a record is loaded."""
@@ -495,6 +506,7 @@ class DetailPage(QWidget):
     def request_approve(self) -> None:
         """Emit an approve request for the current invoice."""
         if self.invoice_id() is not None and QMessageBox.question(self, "Approve Invoice", "Approve this invoice?") == QMessageBox.StandardButton.Yes:
+            self.set_review_action_busy(True)
             self.approve_requested.emit(self.invoice_id())
 
     def request_corrections(self) -> None:
@@ -510,6 +522,7 @@ class DetailPage(QWidget):
             return
         reason, ok = QInputDialog.getMultiLineText(self, "Reject Invoice", "Rejection reason")
         if ok and reason.strip():
+            self.set_review_action_busy(True)
             self.reject_requested.emit(self.invoice_id(), reason.strip())
 
     def request_reprocess(self) -> None:

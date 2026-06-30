@@ -9,7 +9,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QDate
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from desktop_app.ui.constants import FIELD_GROUPS, LINE_COLUMNS, REQUIRED_METADATA_FIELDS
 from desktop_app.ui.dashboard_page import DashboardPage
@@ -206,6 +206,87 @@ class DetailPageLayoutTests(unittest.TestCase):
         self.assertEqual(window.workflow.payload["corrections"], {"vendor_name": "Corrected Vendor"})
         self.assertEqual(window.loaded_invoice, {"id": 5})
 
+    def test_approve_and_reject_use_returned_invoice_without_reopening(self) -> None:
+        """Review actions should render the returned invoice instead of reloading it."""
+
+        class FakeDetail:
+            def __init__(self) -> None:
+                self.busy_states = []
+
+            def build_corrections(self):
+                return {}
+
+            def set_review_action_busy(self, is_busy):
+                self.busy_states.append(is_busy)
+
+        class FakeWorkflow:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def submit_review(self, invoice_id, payload):
+                self.calls.append((invoice_id, payload))
+                return {"id": invoice_id, "status": "Rejected" if payload["decision"] == "reject" else "Approved"}
+
+        class DummyWindow:
+            def __init__(self) -> None:
+                self.detail = FakeDetail()
+                self.workflow = FakeWorkflow()
+                self.loaded_invoices = []
+                self.opened_invoice_ids = []
+                self.current_document_invoice_id = None
+
+            def reviewer_name(self):
+                return "reviewer"
+
+            def run_task(self, task, callback, *args, on_error=None, on_progress=None):
+                callback(task(*args))
+
+            def load_saved_invoice(self, invoice):
+                self.loaded_invoices.append(invoice)
+                self.current_document_invoice_id = int(invoice["id"])
+
+            def open_invoice(self, invoice_id):
+                self.opened_invoice_ids.append(invoice_id)
+
+            def review_action_failed(self, message):
+                raise AssertionError(message)
+
+        window = DummyWindow()
+        MainWindow.approve_invoice(window, 7)
+        MainWindow.reject_invoice(window, 8, "Duplicate invoice")
+
+        self.assertEqual(window.opened_invoice_ids, [])
+        self.assertEqual(window.loaded_invoices, [{"id": 7, "status": "Approved"}, {"id": 8, "status": "Rejected"}])
+        self.assertEqual(window.workflow.calls[0][1], {"decision": "approve", "reviewer": "reviewer"})
+        self.assertEqual(
+            window.workflow.calls[1][1],
+            {"decision": "reject", "reviewer": "reviewer", "rejection_reason": "Duplicate invoice"},
+        )
+
+    def test_review_action_failure_restores_buttons(self) -> None:
+        """Failed approve/reject saves should clear the temporary busy state."""
+
+        class FakeDetail:
+            def __init__(self) -> None:
+                self.busy_states = []
+
+            def set_review_action_busy(self, is_busy):
+                self.busy_states.append(is_busy)
+
+        class DummyWindow:
+            def __init__(self) -> None:
+                self.detail = FakeDetail()
+                self.errors = []
+
+            def show_error(self, message):
+                self.errors.append(message)
+
+        window = DummyWindow()
+        MainWindow.review_action_failed(window, "Could not save review")
+
+        self.assertEqual(window.detail.busy_states, [False])
+        self.assertEqual(window.errors, ["Could not save review"])
+
     def test_corrections_button_reenables_after_saved_invoice_is_edited_again(self) -> None:
         """After a saved correction reloads, another edit should enable submit again."""
         page = DetailPage()
@@ -347,6 +428,107 @@ class DetailPageLayoutTests(unittest.TestCase):
             self.assertFalse(page.corrections_btn.isEnabled())
         finally:
             page.deleteLater()
+
+
+    def test_review_action_busy_disables_actions_until_invoice_reload(self) -> None:
+        """Confirmed review actions should disable buttons while the worker is saving."""
+        page = DetailPage()
+        try:
+            invoice = {
+                "id": 7,
+                "status": "Pending_Review",
+                "confidence_score": 1.0,
+                "extracted_data": {
+                    "invoice_number": "INV-7",
+                    "date": "01-04-2026",
+                    "vendor_name": "Vendor A",
+                    "total_taxable_amount": 100.0,
+                    "total_amount": 118.0,
+                    "line_items": [],
+                },
+                "validation": {"is_valid": True, "errors": [], "warnings": [], "issues": []},
+            }
+            page.load_invoice(invoice)
+            page.metadata.fields["vendor_name"].setText("Vendor B")
+            self.assertTrue(page.approve_btn.isEnabled())
+            self.assertTrue(page.reject_btn.isEnabled())
+            self.assertTrue(page.corrections_btn.isEnabled())
+            self.assertTrue(page.reprocess_btn.isEnabled())
+
+            page.set_review_action_busy(True)
+
+            self.assertFalse(page.approve_btn.isEnabled())
+            self.assertFalse(page.reject_btn.isEnabled())
+            self.assertFalse(page.corrections_btn.isEnabled())
+            self.assertFalse(page.reprocess_btn.isEnabled())
+            self.assertFalse(page.export_btn.isEnabled())
+
+            page.set_review_action_busy(False)
+            self.assertTrue(page.approve_btn.isEnabled())
+            self.assertTrue(page.reject_btn.isEnabled())
+            self.assertTrue(page.corrections_btn.isEnabled())
+            self.assertTrue(page.reprocess_btn.isEnabled())
+
+            approved_invoice = dict(invoice)
+            approved_invoice["status"] = "Approved"
+            page.load_invoice(approved_invoice)
+            self.assertFalse(page.approve_btn.isEnabled())
+            self.assertFalse(page.reject_btn.isEnabled())
+            self.assertTrue(page.export_btn.isEnabled())
+        finally:
+            page.deleteLater()
+
+
+    def test_confirmed_approve_and_reject_disable_actions_immediately(self) -> None:
+        """Button confirmation should disable actions before the worker result returns."""
+        base_invoice = {
+            "id": 8,
+            "status": "Pending_Review",
+            "confidence_score": 1.0,
+            "extracted_data": {
+                "invoice_number": "INV-8",
+                "date": "01-04-2026",
+                "vendor_name": "Vendor A",
+                "total_taxable_amount": 100.0,
+                "total_amount": 118.0,
+                "line_items": [],
+            },
+            "validation": {"is_valid": True, "errors": [], "warnings": [], "issues": []},
+        }
+
+        approve_page = DetailPage()
+        reject_page = DetailPage()
+        try:
+            approve_ids = []
+            approve_page.load_invoice(base_invoice)
+            approve_page.approve_requested.connect(approve_ids.append)
+            with patch(
+                "desktop_app.ui.detail_page.QMessageBox.question",
+                return_value=QMessageBox.StandardButton.Yes,
+            ):
+                approve_page.request_approve()
+
+            self.assertEqual(approve_ids, [8])
+            self.assertFalse(approve_page.approve_btn.isEnabled())
+            self.assertFalse(approve_page.reject_btn.isEnabled())
+            self.assertFalse(approve_page.reprocess_btn.isEnabled())
+
+            reject_ids = []
+            reject_page.load_invoice(dict(base_invoice, id=9))
+            reject_page.reject_requested.connect(lambda invoice_id, reason: reject_ids.append((invoice_id, reason)))
+            with patch(
+                "desktop_app.ui.detail_page.QInputDialog.getMultiLineText",
+                return_value=("Duplicate invoice", True),
+            ):
+                reject_page.request_reject()
+
+            self.assertEqual(reject_ids, [(9, "Duplicate invoice")])
+            self.assertFalse(reject_page.approve_btn.isEnabled())
+            self.assertFalse(reject_page.reject_btn.isEnabled())
+            self.assertFalse(reject_page.reprocess_btn.isEnabled())
+        finally:
+            approve_page.deleteLater()
+            reject_page.deleteLater()
 
 
     def test_dashboard_usage_date_and_cards_render_stats(self) -> None:

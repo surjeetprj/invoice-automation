@@ -323,7 +323,11 @@ class MainWindow(SettingsActionsMixin, TallyActionsMixin, QMainWindow):
             }
         else:
             payload = {"decision": "approve", "reviewer": self.reviewer_name()}
-        self.run_task(lambda: self.workflow.submit_review(invoice_id, payload), lambda _result: self.open_invoice(invoice_id))
+        self.run_task(
+            lambda: self.workflow.submit_review(invoice_id, payload),
+            self.load_saved_invoice,
+            on_error=self.review_action_failed,
+        )
 
     def submit_corrections(self, invoice_id: int, corrections: dict[str, Any]) -> None:
         """Save manual corrections without approving the invoice."""
@@ -335,10 +339,19 @@ class MainWindow(SettingsActionsMixin, TallyActionsMixin, QMainWindow):
         self.current_document_invoice_id = int(invoice["id"])
         self.detail.load_invoice(invoice)
 
+    def review_action_failed(self, message: str) -> None:
+        """Restore review actions after a failed approve/reject task."""
+        self.detail.set_review_action_busy(False)
+        self.show_error(message)
+
     def reject_invoice(self, invoice_id: int, reason: str) -> None:
         """Reject an invoice with a reviewer-provided reason."""
         payload = {"decision": "reject", "reviewer": self.reviewer_name(), "rejection_reason": reason}
-        self.run_task(lambda: self.workflow.submit_review(invoice_id, payload), lambda _result: self.open_invoice(invoice_id))
+        self.run_task(
+            lambda: self.workflow.submit_review(invoice_id, payload),
+            self.load_saved_invoice,
+            on_error=self.review_action_failed,
+        )
 
     def reprocess_invoice(self, invoice_id: int) -> None:
         """Re-run extraction and validation for an invoice."""
