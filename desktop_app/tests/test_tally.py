@@ -427,7 +427,7 @@ class TallyServiceTests(unittest.TestCase):
         self.assertIn("<TYPE>Voucher</TYPE>", xml)
         self.assertIn("<SVCURRENTCOMPANY>Runtime Company</SVCURRENTCOMPANY>", xml)
         self.assertIn("<FETCH>VOUCHERNUMBER,VOUCHERTYPENAME,DATE,PARTYINVNO,REFERENCE,MASTERID,VOUCHERID</FETCH>", xml)
-        self.assertIn("<FILTERS>InvoiceAIVoucherByMasterId</FILTERS>", xml)
+        self.assertIn("<FILTERS>BahiAIVoucherByMasterId</FILTERS>", xml)
         self.assertIn("$MASTERID = 101", xml)
 
         voucher_id_xml = build_posted_voucher_lookup_xml("101", company="Runtime Company", id_field="VOUCHERID").decode("utf-8")
@@ -509,12 +509,12 @@ class TallyServiceTests(unittest.TestCase):
     def test_build_collection_export_xml_for_unit(self) -> None:
         """Collection export XML for Unit master type should fetch both NAME and FORMALNAME."""
         from desktop_app.services.tally.masters import build_collection_export_xml
-        xml = build_collection_export_xml("InvoiceAIUnits", "Unit").decode("utf-8")
+        xml = build_collection_export_xml("BahiAIUnits", "Unit").decode("utf-8")
         self.assertIn("<FETCH>NAME</FETCH>", xml)
         self.assertIn("<FETCH>FORMALNAME</FETCH>", xml)
 
         # For non-Unit collections, it should not fetch FORMALNAME
-        xml_ledger = build_collection_export_xml("InvoiceAILedgers", "Ledger").decode("utf-8")
+        xml_ledger = build_collection_export_xml("BahiAILedgers", "Ledger").decode("utf-8")
         self.assertIn("<FETCH>NAME</FETCH>", xml_ledger)
         self.assertNotIn("<FETCH>FORMALNAME</FETCH>", xml_ledger)
 
@@ -601,8 +601,8 @@ class TallyServiceTests(unittest.TestCase):
 
         self.assertEqual(ledgers, ["Input CGST", "Purchase"])
         self.assertEqual(stock_groups, ["Licenses", "Primary"])
-        client.fetch_master_names.assert_any_call("InvoiceAISettingsLedgers", "Ledger", company="SRC Pvt Ltd")
-        client.fetch_master_names.assert_any_call("InvoiceAISettingsStockGroups", "Stock Group", company="SRC Pvt Ltd")
+        client.fetch_master_names.assert_any_call("BahiAISettingsLedgers", "Ledger", company="SRC Pvt Ltd")
+        client.fetch_master_names.assert_any_call("BahiAISettingsStockGroups", "Stock Group", company="SRC Pvt Ltd")
 
     def test_workflow_lists_tally_options(self) -> None:
         """list_tally_options should query groups and ledgers and filter/categorize them by parent group."""

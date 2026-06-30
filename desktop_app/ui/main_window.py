@@ -51,7 +51,7 @@ class MainWindow(SettingsActionsMixin, TallyActionsMixin, QMainWindow):
         self.current_settings: dict[str, Any] = {}
         self.loading_settings = False
 
-        self.setWindowTitle("Invoice AI Desktop")
+        self.setWindowTitle("BahiAI Desktop")
         self.resize(1280, 820)
 
         shell = QWidget()
@@ -87,7 +87,7 @@ class MainWindow(SettingsActionsMixin, TallyActionsMixin, QMainWindow):
         layout.setContentsMargins(18, 10, 18, 10)
         layout.setSpacing(12)
 
-        title = QLabel("Invoice AI")
+        title = QLabel("BahiAI")
         title.setObjectName("appTitle")
         status_row = QHBoxLayout()
         status_row.setContentsMargins(0, 0, 0, 0)
@@ -398,4 +398,4 @@ class MainWindow(SettingsActionsMixin, TallyActionsMixin, QMainWindow):
 
     def show_error(self, message: str) -> None:
         """Display a workflow error dialog."""
-        QMessageBox.critical(self, "Invoice AI Desktop", message)
+        QMessageBox.critical(self, "BahiAI Desktop", message)

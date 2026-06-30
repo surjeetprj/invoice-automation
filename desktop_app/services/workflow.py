@@ -110,14 +110,14 @@ class DesktopWorkflow:
         self.initialize()
         selected_company = (company or get_tally_settings().tally_company or "").strip()
         logger.info("Listing TallyPrime ledgers for company: %s", selected_company or "<default>")
-        return sorted(TallyClient().fetch_master_names("InvoiceAISettingsLedgers", "Ledger", company=selected_company), key=str.casefold)
+        return sorted(TallyClient().fetch_master_names("BahiAISettingsLedgers", "Ledger", company=selected_company), key=str.casefold)
 
     def list_tally_stock_groups(self, company: str | None = None) -> list[str]:
         """Return stock group names from TallyPrime for the selected company."""
         self.initialize()
         selected_company = (company or get_tally_settings().tally_company or "").strip()
         logger.info("Listing TallyPrime stock groups for company: %s", selected_company or "<default>")
-        return sorted(TallyClient().fetch_master_names("InvoiceAISettingsStockGroups", "Stock Group", company=selected_company), key=str.casefold)
+        return sorted(TallyClient().fetch_master_names("BahiAISettingsStockGroups", "Stock Group", company=selected_company), key=str.casefold)
 
     def list_tally_options(self, company: str | None = None) -> dict[str, Any]:
         """Return categorized and filtered TallyPrime choices for settings dropdowns."""
@@ -126,9 +126,9 @@ class DesktopWorkflow:
         logger.info("Listing TallyPrime options for company: %s", selected_company or "<default>")
         
         client = TallyClient()
-        raw_groups = client.fetch_master_details("InvoiceAISettingsGroups", "Group", company=selected_company)
-        raw_ledgers = client.fetch_master_details("InvoiceAISettingsLedgersWithParent", "Ledger", company=selected_company)
-        stock_groups = sorted(client.fetch_master_names("InvoiceAISettingsStockGroups", "Stock Group", company=selected_company), key=str.casefold)
+        raw_groups = client.fetch_master_details("BahiAISettingsGroups", "Group", company=selected_company)
+        raw_ledgers = client.fetch_master_details("BahiAISettingsLedgersWithParent", "Ledger", company=selected_company)
+        stock_groups = sorted(client.fetch_master_names("BahiAISettingsStockGroups", "Stock Group", company=selected_company), key=str.casefold)
         
         parent_map = {g["name"]: g["parent"] for g in raw_groups}
         
@@ -193,7 +193,7 @@ class DesktopWorkflow:
     def health(self) -> dict[str, str]:
         """Return a lightweight readiness payload."""
         self.initialize()
-        return {"status": "healthy", "service": "Invoice AI Desktop"}
+        return {"status": "healthy", "service": "BahiAI Desktop"}
 
     def stats(self, usage_from_date: str | None = None) -> dict[str, Any]:
         """Calculate dashboard statistics from the local database."""
@@ -772,15 +772,15 @@ class DesktopWorkflow:
             try:
                 client = TallyClient(url=settings.tally_url, timeout=min(settings.tally_timeout_seconds, 5))
                 candidates[VENDOR_LEDGER] = sorted(
-                    client.fetch_master_names("InvoiceAIReviewVendorLedgers", "Ledger", company=company),
+                    client.fetch_master_names("BahiAIReviewVendorLedgers", "Ledger", company=company),
                     key=str.casefold,
                 )
                 candidates[STOCK_ITEM] = sorted(
-                    client.fetch_master_names("InvoiceAIReviewStockItems", "Stock Item", company=company),
+                    client.fetch_master_names("BahiAIReviewStockItems", "Stock Item", company=company),
                     key=str.casefold,
                 )
                 candidates[UNIT] = sorted(
-                    client.fetch_master_names("InvoiceAIReviewUnits", "Unit", company=company),
+                    client.fetch_master_names("BahiAIReviewUnits", "Unit", company=company),
                     key=str.casefold,
                 )
             except Exception as exc:

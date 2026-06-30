@@ -1,1 +1,1 @@
-"""Self-contained Invoice AI desktop application."""
+"""Self-contained BahiAI desktop application."""

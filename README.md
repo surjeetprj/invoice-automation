@@ -1,4 +1,4 @@
-# Invoice AI Desktop App
+# BahiAI Desktop App
 
 PySide6 desktop application for invoice upload, AI extraction, human review,
 audit logs, document preview, and purchase voucher export.
@@ -64,8 +64,8 @@ Use `python desktop_app` only from the project root. From inside
 
 ## Upgrade Behavior
 
-On first startup after an app update, Invoice AI upgrades an existing local
-`InvoiceAI\invoices.db` in place when needed. Legacy JSON extraction fields are
+On first startup after an app update, BahiAI upgrades an existing local
+`BahiAI\bahiai.db` in place when needed. Legacy JSON extraction fields are
 backfilled into the normalized invoice tables while invoice summaries, review
 state, and audit logs are preserved. No manual runtime data cleanup is required.
 
@@ -100,7 +100,7 @@ target company open and HTTP enabled, usually at `http://localhost:9000`.
 The top bar includes a Company selector and Settings button for customer-editable
 Tally defaults, including the Stock Group for item-wise posting.
 Tally URL, timeout, and selected company are saved globally in
-`InvoiceAI\settings.json`. Confirmed ledger/group mappings are stored in SQLite
+`BahiAI\settings.json`. Confirmed ledger/group mappings are stored in SQLite
 in `tally_master_mapping`, keyed by selected company and mapping type.
 Settings-page values such as `Vender A/C Group`, `Stock Group`, Purchase Ledger,
 and input GST ledgers are saved as SQL `DEFAULT` mappings. The Settings dialog
@@ -112,7 +112,7 @@ Invoice review may show dynamic mappings such as vendor ledger, stock item, and
 unit. Those review rows are saved against the company that was active when the
 rows were displayed, so changing the top-bar company before `Submit Corrections`
 does not redirect those mapping saves to another Tally company.
-Before any direct Tally sync/post, InvoiceAI verifies that the selected company
+Before any direct Tally sync/post, BahiAI verifies that the selected company
 is returned by the running TallyPrime instance. If the company is blank, typed
 wrongly, or not open/loaded in TallyPrime, export is blocked before masters or
 vouchers are created.
@@ -122,7 +122,7 @@ name while keeping multiline item details separately. It can create
 required units, stock groups, and stock items, and it blocks before posting when
 reviewed item data is incomplete.
 
-The Settings dialog `Test Connection` action reads the local TallyPrime serial number from the Product AboutPage HTTP/XML report and displays it for support visibility only. Direct TallyPrime export does not verify a signed InvoiceAI license.
+The Settings dialog `Test Connection` action reads the local TallyPrime serial number from the Product AboutPage HTTP/XML report and displays it for support visibility only. Direct TallyPrime export does not verify a signed BahiAI license.
 
 ## Developer Context
 

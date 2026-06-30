@@ -6,13 +6,80 @@ import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 
 APP_DIR = Path(__file__).resolve().parent
-load_dotenv(APP_DIR / ".env")
+APP_NAME = "BahiAI"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 
-APP_NAME = "InvoiceAI"
+
+def executable_dir() -> Path:
+    """Return the directory that owns the frozen executable or source package."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return APP_DIR
+
+
+def default_app_data_dir() -> Path:
+    """Return the standard app-data directory for this platform."""
+    if sys.platform.startswith("win"):
+        base = os.getenv("LOCALAPPDATA") or os.getenv("APPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / APP_NAME
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_NAME
+    return Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local" / "share")) / APP_NAME
+
+
+def is_portable_mode() -> bool:
+    """Return True when runtime data should live beside the executable."""
+    exe_dir = executable_dir()
+    return (exe_dir / "portable.txt").exists() or (exe_dir / "data").exists()
+
+
+def app_env_path() -> Path:
+    """Return the highest-priority .env path for the current runtime context."""
+    exe_env = executable_dir() / ".env"
+    if exe_env.exists():
+        return exe_env
+    appdata_env = default_app_data_dir() / ".env"
+    if appdata_env.exists() or getattr(sys, "frozen", False):
+        return appdata_env
+    return APP_DIR / ".env"
+
+
+def ensure_appdata_env_template() -> None:
+    """Create a customer-editable AppData .env template when absent."""
+    path = default_app_data_dir() / ".env"
+    if path.exists() or is_portable_mode():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(
+            [
+                "# BahiAI runtime configuration",
+                "GOOGLE_API_KEY=",
+                f"GEMINI_MODEL={DEFAULT_GEMINI_MODEL}",
+                "TALLY_URL=http://localhost:9000",
+                "TALLY_COMPANY=",
+                "TALLY_TIMEOUT_SECONDS=20",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def load_runtime_env() -> Path:
+    """Load the prioritized .env file and return the chosen path."""
+    if getattr(sys, "frozen", False):
+        ensure_appdata_env_template()
+    path = app_env_path()
+    load_dotenv(path, override=True)
+    return path
+
+
+ENV_PATH = load_runtime_env()
 
 
 def app_data_dir() -> Path:
@@ -20,12 +87,9 @@ def app_data_dir() -> Path:
     override = os.getenv("DESKTOP_RUNTIME_DIR")
     if override:
         return Path(override).expanduser()
-    if sys.platform.startswith("win"):
-        base = os.getenv("LOCALAPPDATA") or os.getenv("APPDATA") or str(Path.home() / "AppData" / "Local")
-        return Path(base) / APP_NAME
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / APP_NAME
-    return Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local" / "share")) / APP_NAME
+    if is_portable_mode():
+        return executable_dir() / "data"
+    return default_app_data_dir()
 
 
 RUNTIME_DIR = app_data_dir()
@@ -40,9 +104,8 @@ def ensure_runtime_dirs() -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
-DATABASE_URL = os.getenv("DESKTOP_DATABASE_URL", f"sqlite:///{(RUNTIME_DIR / 'invoices.db').as_posix()}")
+DATABASE_URL = os.getenv("DESKTOP_DATABASE_URL", f"sqlite:///{(RUNTIME_DIR / 'bahiai.db').as_posix()}")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
 PURCHASE_LEDGER_NAME = os.getenv("PURCHASE_LEDGER_NAME", "Purchase Account")
 INPUT_CGST_LEDGER_NAME = os.getenv("INPUT_CGST_LEDGER_NAME", "Input CGST")
@@ -64,6 +127,16 @@ CURRENCY_DECIMAL_PLACES = int(os.getenv("CURRENCY_DECIMAL_PLACES", "2"))
 EWAY_BILL_THRESHOLD = float(os.getenv("EWAY_BILL_THRESHOLD", "50000.0"))
 VALID_GST_RATES = {0.0, 0.25, 3.0, 5.0, 12.0, 18.0, 28.0}
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+
+
+def get_gemini_config() -> tuple[str, str]:
+    """Return the latest Gemini API key and model from the prioritized .env."""
+    values = dotenv_values(app_env_path())
+    api_key = values.get("GOOGLE_API_KEY")
+    model = values.get("GEMINI_MODEL")
+    return str(api_key if api_key is not None else os.getenv("GOOGLE_API_KEY", "")), str(
+        model if model is not None else os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+    )
 
 
 class InvoiceStatus:

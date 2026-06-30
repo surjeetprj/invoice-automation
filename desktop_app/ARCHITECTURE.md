@@ -1,6 +1,6 @@
 # Architecture
 
-Invoice AI Desktop is a monolithic PySide6 app. The UI calls
+BahiAI Desktop is a monolithic PySide6 app. The UI calls
 `DesktopWorkflow`, which is the main facade for upload, processing, review,
 audit logs, exports, and direct TallyPrime posting. The invoice detail page is
 designed as a compact reviewer workspace: Metadata contains grouped voucher,
@@ -67,7 +67,7 @@ error banner at the top of the details view on the Invoice Details page.
 
 The normalized SQLite database stores invoice summary rows, scalar extraction
 fields, line items, line taxes, invoice-level tax breakups, validation issues,
-and audit logs. Legacy JSON `invoices.db` files are upgraded in place on
+and audit logs. Legacy JSON `bahiai.db` files are upgraded in place on
 startup without dropping old columns, summaries, review state, or audit logs.
 
 Runtime uploads, exports, logs, and the local SQLite database live outside the
@@ -145,4 +145,4 @@ The review flow separates saving corrections from approval:
 
 ## TallyPrime Serial Display
 
-The Settings dialog `Test Connection` action asks `TallyClient` for the connected TallyPrime serial number using the Product AboutPage HTTP/XML report. The serial is displayed for support visibility only. Direct TallyPrime preflight, master sync, and voucher posting are guarded by selected-company verification, approval status, reviewer confirmation, and Tally response handling, not by a signed InvoiceAI license.
+The Settings dialog `Test Connection` action asks `TallyClient` for the connected TallyPrime serial number using the Product AboutPage HTTP/XML report. The serial is displayed for support visibility only. Direct TallyPrime preflight, master sync, and voucher posting are guarded by selected-company verification, approval status, reviewer confirmation, and Tally response handling, not by a signed BahiAI license.

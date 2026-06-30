@@ -88,7 +88,7 @@ class TallyClient:
 
     def check_connection(self) -> None:
         """Raise if the TallyPrime HTTP endpoint cannot be reached."""
-        self.fetch_master_names("InvoiceAIConnectionCheck", "Company")
+        self.fetch_master_names("BahiAIConnectionCheck", "Company")
 
     def fetch_company_names(self) -> set[str]:
         """Fetch available company names from TallyPrime."""
@@ -170,11 +170,11 @@ class TallyClient:
 
     def _preflight_masters(self, required: tuple[TallyMaster, ...]) -> TallyPreflight:
         """Check which of the requested masters do not exist in TallyPrime."""
-        ledger_names = normalized_names(self.fetch_master_names("InvoiceAILedgers", "Ledger"))
-        voucher_type_names = normalized_names(self.fetch_master_names("InvoiceAIVoucherTypes", VOUCHER_TYPE))
-        unit_names = normalized_names(self.fetch_master_names("InvoiceAIUnits", "Unit"))
-        stock_group_names = normalized_names(self.fetch_master_names("InvoiceAIStockGroups", "Stock Group"))
-        stock_item_names = normalized_names(self.fetch_master_names("InvoiceAIStockItems", "Stock Item"))
+        ledger_names = normalized_names(self.fetch_master_names("BahiAILedgers", "Ledger"))
+        voucher_type_names = normalized_names(self.fetch_master_names("BahiAIVoucherTypes", VOUCHER_TYPE))
+        unit_names = normalized_names(self.fetch_master_names("BahiAIUnits", "Unit"))
+        stock_group_names = normalized_names(self.fetch_master_names("BahiAIStockGroups", "Stock Group"))
+        stock_item_names = normalized_names(self.fetch_master_names("BahiAIStockItems", "Stock Item"))
         names_by_kind = {
             VOUCHER_TYPE: voucher_type_names,
             UNIT_MASTER: unit_names,
@@ -191,7 +191,7 @@ class TallyClient:
 
 def build_tally_companies_xml() -> bytes:
     """Build a Tally collection export request for all company names."""
-    unique_name = unique_collection_name("InvoiceAICompanies")
+    unique_name = unique_collection_name("BahiAICompanies")
     envelope = Element("ENVELOPE")
     header = SubElement(envelope, "HEADER")
     SubElement(header, "VERSION").text = "1"

@@ -52,7 +52,7 @@ def create_app(argv: list[str] | None = None) -> tuple[QApplication, MainWindow]
 
 
 def main() -> int:
-    """Run the Invoice AI desktop application."""
+    """Run the BahiAI desktop application."""
     app, window = create_app()
     window.show()
     return app.exec()

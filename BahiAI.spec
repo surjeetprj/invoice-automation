@@ -1,19 +1,26 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-"""PyInstaller build specification for Invoice AI Desktop."""
-
 from pathlib import Path
-
+from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 project_root = Path.cwd()
+cn_datas, cn_binaries, cn_hiddenimports = collect_all("charset_normalizer")
+
+datas = [
+    ("desktop_app/resources/styles.qss", "desktop_app/resources"),
+    ("desktop_app/resources/icon.ico", "desktop_app/resources"),
+] + cn_datas
+
+binaries = cn_binaries
+hiddenimports = ["pypdfium2"] + cn_hiddenimports
 
 a = Analysis(
     ["desktop_app/__main__.py"],
     pathex=[str(project_root)],
-    binaries=[],
-    datas=[("desktop_app/resources/styles.qss", "desktop_app/resources")],
-    hiddenimports=["pypdfium2"],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -29,7 +36,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="InvoiceAI",
+    name="BahiAI",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -40,6 +47,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon="desktop_app/resources/icon.ico",
+    version="file_version_info.txt",
 )
 coll = COLLECT(
     exe,
@@ -49,5 +58,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="InvoiceAI",
+    name="BahiAI",
 )

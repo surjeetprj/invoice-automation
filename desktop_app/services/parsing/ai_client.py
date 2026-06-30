@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ...config import GEMINI_MODEL, GOOGLE_API_KEY
+from ...config import get_gemini_config
 from ...domain.schemas import InvoiceData
 from .ai_prompts import SYSTEM_PROMPT, VISUAL_SYSTEM_PROMPT
 
@@ -27,7 +27,8 @@ class AIRateLimitError(AIClientError):
 
 def invoke_invoice_parser(raw_markdown: str, vendor_hint: str | None = None) -> dict[str, Any]:
     """Parse extracted digital-PDF text through Gemini's direct JSON-schema API."""
-    if not GOOGLE_API_KEY:
+    api_key, _model = get_gemini_config()
+    if not api_key:
         raise RuntimeError("GOOGLE_API_KEY is not configured. AI parsing cannot run.")
 
     try:
@@ -56,7 +57,8 @@ def invoke_invoice_text_json_parser(raw_markdown: str, vendor_hint: str | None =
 
 def invoke_invoice_file_parser(file_path: str | Path, mime_type: str, vendor_hint: str | None = None) -> dict[str, Any]:
     """Call Gemini once with inline file bytes and return an InvoiceData-shaped dictionary."""
-    if not GOOGLE_API_KEY:
+    api_key, _model = get_gemini_config()
+    if not api_key:
         raise RuntimeError("GOOGLE_API_KEY is not configured. AI parsing cannot run.")
 
     path = Path(file_path)
@@ -89,9 +91,10 @@ def _generate_invoice_content(contents: list[Any]) -> dict[str, Any]:
     from google import genai
     from google.genai import types
 
-    with genai.Client(api_key=GOOGLE_API_KEY) as client:
+    api_key, model = get_gemini_config()
+    with genai.Client(api_key=api_key) as client:
         response = client.models.generate_content(
-            model=GEMINI_MODEL,
+            model=model,
             contents=contents,
             config=types.GenerateContentConfig(
                 temperature=0.0,

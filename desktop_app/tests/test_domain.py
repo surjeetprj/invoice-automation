@@ -250,8 +250,7 @@ class DomainHelperTests(unittest.TestCase):
             path = Path(temp_dir) / "invoice.png"
             path.write_bytes(b"fake image bytes")
             with (
-                patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
-                patch("desktop_app.services.parsing.ai_client.GEMINI_MODEL", "test-visual-model"),
+                patch("desktop_app.services.parsing.ai_client.get_gemini_config", return_value=("test-key", "test-visual-model")),
                 patch("google.genai.Client", return_value=fake_context),
             ):
                 result = invoke_invoice_file_parser(path, "image/png", "invoice.png")
@@ -271,8 +270,7 @@ class DomainHelperTests(unittest.TestCase):
         fake_context.__enter__.return_value = fake_client
 
         with (
-            patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
-            patch("desktop_app.services.parsing.ai_client.GEMINI_MODEL", "test-text-model"),
+            patch("desktop_app.services.parsing.ai_client.get_gemini_config", return_value=("test-key", "test-text-model")),
             patch("google.genai.Client", return_value=fake_context),
         ):
             result = invoke_invoice_parser("raw invoice text", "invoice.pdf")
@@ -292,7 +290,7 @@ class DomainHelperTests(unittest.TestCase):
         fake_context.__enter__.return_value = fake_client
 
         with (
-            patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
+            patch("desktop_app.services.parsing.ai_client.get_gemini_config", return_value=("test-key", "test-model")),
             patch("google.genai.Client", return_value=fake_context),
         ):
             with self.assertRaises(AIRateLimitError) as context:
@@ -335,7 +333,7 @@ class DomainHelperTests(unittest.TestCase):
             large_path.write_bytes(b"0" * (15 * 1024 * 1024 + 1))
 
             with (
-                patch("desktop_app.services.parsing.ai_client.GOOGLE_API_KEY", "test-key"),
+                patch("desktop_app.services.parsing.ai_client.get_gemini_config", return_value=("test-key", "test-model")),
                 patch("google.genai.Client") as client_factory,
             ):
                 with self.assertRaises(FileNotFoundError):

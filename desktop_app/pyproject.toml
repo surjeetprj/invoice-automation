@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "invoice-ai-desktop"
+name = "bahiai-desktop"
 version = "0.1.0"
 description = "Self-contained PySide6 desktop invoice automation application."
 requires-python = ">=3.11"
@@ -25,7 +25,7 @@ dev = ["pytest>=8.0,<9"]
 build = ["pyinstaller>=6.0,<7"]
 
 [project.scripts]
-invoice-ai-desktop = "desktop_app.app:main"
+bahiai-desktop = "desktop_app.app:main"
 
 [tool.setuptools]
 packages = ["desktop_app", "desktop_app.db", "desktop_app.domain", "desktop_app.services", "desktop_app.ui", "desktop_app.ui.widgets"]
@@ -35,7 +35,7 @@ include-package-data = true
 desktop_app = "."
 
 [tool.setuptools.package-data]
-desktop_app = ["resources/*.qss"]
+desktop_app = ["resources/*.qss", "resources/*.ico"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

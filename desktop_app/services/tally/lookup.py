@@ -23,7 +23,7 @@ class TallyVoucherDetails:
 
 def build_posted_voucher_lookup_xml(last_voucher_id: str, company: str | None = None, *, id_field: str = "MASTERID") -> bytes:
     """Build a Tally collection export filtered by one posted voucher ID field."""
-    collection_name = unique_collection_name("InvoiceAIPostedVoucher")
+    collection_name = unique_collection_name("BahiAIPostedVoucher")
     envelope = Element("ENVELOPE")
     header = SubElement(envelope, "HEADER")
     SubElement(header, "VERSION").text = "1"
@@ -43,8 +43,8 @@ def build_posted_voucher_lookup_xml(last_voucher_id: str, company: str | None = 
     collection = SubElement(message, "COLLECTION", NAME=collection_name, ISMODIFY="No")
     SubElement(collection, "TYPE").text = "Voucher"
     SubElement(collection, "FETCH").text = "VOUCHERNUMBER,VOUCHERTYPENAME,DATE,PARTYINVNO,REFERENCE,MASTERID,VOUCHERID"
-    SubElement(collection, "FILTERS").text = "InvoiceAIVoucherByMasterId"
-    formula = SubElement(message, "SYSTEM", TYPE="Formulae", NAME="InvoiceAIVoucherByMasterId")
+    SubElement(collection, "FILTERS").text = "BahiAIVoucherByMasterId"
+    formula = SubElement(message, "SYSTEM", TYPE="Formulae", NAME="BahiAIVoucherByMasterId")
     formula.text = f"${id_field.upper()} = {last_voucher_id}"
     return tostring(envelope, encoding="utf-8", xml_declaration=True)
 

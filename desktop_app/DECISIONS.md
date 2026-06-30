@@ -44,7 +44,7 @@
   ledger-only posting.
 - A successful direct TallyPrime post changes invoice status to `Posted`; a
   failed post leaves the existing invoice status unchanged.
-- Direct TallyPrime sync/post actions are not gated by an InvoiceAI license. The Settings `Test Connection` action may read the TallyPrime serial from the Product AboutPage HTTP/XML report for display and support visibility only.
+- Direct TallyPrime sync/post actions are not gated by a BahiAI license. The Settings `Test Connection` action may read the TallyPrime serial from the Product AboutPage HTTP/XML report for display and support visibility only.
 - Direct TallyPrime sync/post actions must block when the selected company is
   blank or not returned by TallyPrime, so a wrong setting cannot accidentally
   create masters or vouchers in another company.
