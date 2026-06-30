@@ -27,9 +27,13 @@ class TallyActionsMixin:
         return "the selected company"
 
     def tally_success_message(self, result: dict[str, Any], fallback: str, company: str) -> str:
-        """Append selected-company context to a direct TallyPrime success message."""
+        """Append selected-company and voucher context to a TallyPrime success message."""
         message = str(result.get("message") or fallback).strip()
-        return f"{message}\n\nCompany: {company}"
+        last_voucher_id = str(result.get("last_voucher_id") or "").strip()
+        details = [f"Company: {company}"]
+        if last_voucher_id:
+            details.append(f"Last voucher ID: {last_voucher_id}")
+        return f"{message}\n\n" + "\n".join(details)
 
     def post_invoice_to_tally(self, invoice_id: int) -> None:
         """Preflight and post an approved invoice to local TallyPrime."""

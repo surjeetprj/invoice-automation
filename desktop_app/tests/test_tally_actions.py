@@ -37,11 +37,11 @@ class DummyWorkflow:
 
     def post_invoice_to_tally(self, invoice_id: int, *, create_missing_masters: bool = False) -> dict[str, object]:
         self.create_missing_masters = create_missing_masters
-        return {"success": True, "message": "Invoice posted to TallyPrime."}
+        return {"success": True, "message": "Invoice posted to TallyPrime.", "last_voucher_id": "101"}
 
     def post_invoice_items_to_tally(self, invoice_id: int, *, create_missing_masters: bool = False) -> dict[str, object]:
         self.create_missing_inventory_masters = create_missing_masters
-        return {"success": True, "message": "Invoice items posted to TallyPrime."}
+        return {"success": True, "message": "Invoice items posted to TallyPrime.", "last_voucher_id": "202"}
 
     def sync_vendor_master_to_tally(self, invoice_id: int) -> dict[str, object]:
         return {"success": True, "message": "Vendor master synced to TallyPrime."}
@@ -86,6 +86,7 @@ class TallyActionsMessageTests(unittest.TestCase):
         self.assertFalse(window.workflow.create_missing_masters)
         self.assertEqual(window.opened_invoice_ids, [42])
         self.assert_dialogs_include_company(question, information, "Demo Company")
+        self.assertIn("Last voucher ID: 101", information.call_args.args[2])
 
     def test_ledger_only_missing_master_confirmation_includes_selected_company(self) -> None:
         window = DummyWindow("Demo Company")
@@ -111,6 +112,7 @@ class TallyActionsMessageTests(unittest.TestCase):
         self.assertFalse(window.workflow.create_missing_inventory_masters)
         self.assertEqual(window.opened_invoice_ids, [42])
         self.assert_dialogs_include_company(question, information, "Demo Company")
+        self.assertIn("Last voucher ID: 202", information.call_args.args[2])
 
     def test_item_wise_missing_master_confirmation_includes_selected_company(self) -> None:
         window = DummyWindow("Demo Company")

@@ -497,7 +497,12 @@ class DesktopWorkflow:
             invoice.status = InvoiceStatus.POSTED
             db.commit()
             self.log(db, invoice.id, f"Pushed to TallyPrime ({voucher_response.summary}) - status set to Posted")
-            return {"success": True, "message": "Invoice posted to TallyPrime.", "tally_response": voucher_response.summary}
+            return {
+                "success": True,
+                "message": "Invoice posted to TallyPrime.",
+                "tally_response": voucher_response.summary,
+                "last_voucher_id": voucher_response.last_voucher_id,
+            }
 
     def post_invoice_items_to_tally(self, invoice_id: int, *, create_missing_masters: bool = False) -> dict[str, Any]:
         """Post an approved invoice as an item-wise Purchase voucher to TallyPrime.
@@ -551,7 +556,12 @@ class DesktopWorkflow:
             invoice.status = InvoiceStatus.POSTED
             db.commit()
             self.log(db, invoice.id, f"Pushed item-wise to TallyPrime ({voucher_response.summary}) - status set to Posted")
-            return {"success": True, "message": "Invoice items posted to TallyPrime.", "tally_response": voucher_response.summary}
+            return {
+                "success": True,
+                "message": "Invoice items posted to TallyPrime.",
+                "tally_response": voucher_response.summary,
+                "last_voucher_id": voucher_response.last_voucher_id,
+            }
 
     def sync_vendor_master_to_tally(self, invoice_id: int) -> dict[str, Any]:
         """Update the TallyPrime vendor ledger with extracted invoice vendor details."""

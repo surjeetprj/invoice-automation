@@ -559,10 +559,11 @@ class TallyServiceTests(unittest.TestCase):
                 client.preflight_purchase_invoice.return_value = TallyPreflight((), ())
                 client.sync_vendor_master.return_value = TallyResponse(success=True, altered=1)
                 client.sync_system_ledgers.return_value = TallyResponse(success=True, altered=4)
-                client.post_purchase_voucher.return_value = TallyResponse(success=True, created=1)
+                client.post_purchase_voucher.return_value = TallyResponse(success=True, created=1, last_voucher_id="101")
                 result = workflow.post_invoice_to_tally(invoice_id)
 
         self.assertTrue(result["success"])
+        self.assertEqual(result["last_voucher_id"], "101")
         with Session(engine, expire_on_commit=False, future=True) as db:
             invoice = db.get(Invoice, invoice_id)
             self.assertIsNotNone(invoice)
@@ -585,10 +586,11 @@ class TallyServiceTests(unittest.TestCase):
                 client.sync_vendor_master.return_value = TallyResponse(success=True, altered=1)
                 client.sync_system_ledgers.return_value = TallyResponse(success=True, altered=4)
                 client.sync_inventory_item_masters.return_value = TallyResponse(success=True, altered=1)
-                client.post_inventory_purchase_voucher.return_value = TallyResponse(success=True, created=1)
+                client.post_inventory_purchase_voucher.return_value = TallyResponse(success=True, created=1, last_voucher_id="202")
                 result = workflow.post_invoice_items_to_tally(invoice_id)
 
         self.assertTrue(result["success"])
+        self.assertEqual(result["last_voucher_id"], "202")
         with Session(engine, expire_on_commit=False, future=True) as db:
             invoice = db.get(Invoice, invoice_id)
             self.assertIsNotNone(invoice)
