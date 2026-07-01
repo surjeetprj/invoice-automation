@@ -80,7 +80,7 @@ class DomainHelperTests(unittest.TestCase):
 
     def test_config_default_gemini_model_stays_flash_lite(self) -> None:
         """The configurable Gemini model should keep the current default."""
-        self.assertEqual(DEFAULT_GEMINI_MODEL, "gemini-2.5-flash-lite")
+        self.assertEqual(DEFAULT_GEMINI_MODEL, "gemini-3.1-flash-lite")
 
     def test_ai_normalization_derives_missing_total_tax_amount(self) -> None:
         """Component tax totals should fill total_tax_amount when AI omits it."""
@@ -251,7 +251,7 @@ class DomainHelperTests(unittest.TestCase):
             path.write_bytes(b"fake image bytes")
             with (
                 patch("desktop_app.services.parsing.ai_client.get_gemini_config", return_value=("test-key", "test-visual-model")),
-                patch("google.genai.Client", return_value=fake_context),
+                patch("google.genai.Client", return_value=fake_client),
             ):
                 result = invoke_invoice_file_parser(path, "image/png", "invoice.png")
 
@@ -271,7 +271,7 @@ class DomainHelperTests(unittest.TestCase):
 
         with (
             patch("desktop_app.services.parsing.ai_client.get_gemini_config", return_value=("test-key", "test-text-model")),
-            patch("google.genai.Client", return_value=fake_context),
+            patch("google.genai.Client", return_value=fake_client),
         ):
             result = invoke_invoice_parser("raw invoice text", "invoice.pdf")
 
@@ -290,8 +290,8 @@ class DomainHelperTests(unittest.TestCase):
         fake_context.__enter__.return_value = fake_client
 
         with (
-            patch("desktop_app.services.parsing.ai_client.get_gemini_config", return_value=("test-key", "test-model")),
-            patch("google.genai.Client", return_value=fake_context),
+            patch("desktop_app.services.parsing.ai_client.get_gemini_config", return_value=("test-key", "test-text-model")),
+            patch("google.genai.Client", return_value=fake_client),
         ):
             with self.assertRaises(AIRateLimitError) as context:
                 invoke_invoice_parser("raw invoice text", "invoice.pdf")
