@@ -18,15 +18,15 @@ ssl_binaries = [(str(path), ".") for path in ssl_dlls]
 ssl_upx_excludes = ["_ssl.pyd"] + [path.name for path in ssl_dlls]
 
 datas = [
-    ("desktop_app/resources/styles.qss", "desktop_app/resources"),
-    ("desktop_app/resources/icon.ico", "desktop_app/resources"),
+    (str(project_root / "desktop_app/resources/styles.qss"), "desktop_app/resources"),
+    (str(project_root / "desktop_app/resources/icon.ico"), "desktop_app/resources"),
 ] + cn_datas
 
 binaries = cn_binaries + ssl_binaries
 hiddenimports = ["_ssl", "ssl", "pypdfium2"] + cn_hiddenimports
 
 a = Analysis(
-    ["desktop_app/__main__.py"],
+    [str(project_root / "desktop_app/__main__.py")],
     pathex=[str(project_root)],
     binaries=binaries,
     datas=datas,
@@ -57,8 +57,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon="desktop_app/resources/icon.ico",
-    version="file_version_info.txt",
+    icon=str(project_root / "desktop_app/resources/icon.ico"),
+    version=str(project_root / "Z-compile/file_version_info.txt"),
 )
 coll = COLLECT(
     exe,

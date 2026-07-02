@@ -62,14 +62,14 @@ if (Test-Path "dist\BahiAI") {
     Write-Host "Cleaning dist\BahiAI directory..." -ForegroundColor Cyan
     Remove-Item -Recurse -Force "dist\BahiAI"
 }
-& ".\.venv\Scripts\pyinstaller.exe" --clean --noconfirm "BahiAI.spec"
+& ".\.venv\Scripts\pyinstaller.exe" --clean --noconfirm "Z-compile\BahiAI.spec"
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed with exit code $LASTEXITCODE. Check the output above for details."
 }
 Write-Host "PyInstaller build complete." -ForegroundColor Green
 
 Write-Host "[5/5] Compiling installer using Inno Setup..." -ForegroundColor Yellow
-& $isccPath "BahiAI.iss"
+& $isccPath "Z-compile\BahiAI.iss"
 if ($LASTEXITCODE -ne 0) {
     throw "Inno Setup Compiler failed with exit code $LASTEXITCODE. Check the output above for details."
 }
