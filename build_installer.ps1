@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+$env:PYTHONNOUSERSITE = "1"
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host " Starting BahiAI Package & Build process " -ForegroundColor Cyan

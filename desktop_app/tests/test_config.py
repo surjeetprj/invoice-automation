@@ -3,7 +3,6 @@ from __future__ import annotations
 """Regression tests for BahiAI runtime configuration helpers."""
 
 import os
-import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -33,20 +32,18 @@ class ConfigTests(unittest.TestCase):
                 self.assertTrue(config.is_portable_mode())
                 self.assertEqual(config.app_data_dir(), exe_dir / "data")
 
-    def test_env_priority_prefers_executable_adjacent_file(self) -> None:
+    def test_env_path_uses_executable_adjacent_file_and_ignores_appdata(self) -> None:
         with TemporaryDirectory() as exe_temp, TemporaryDirectory() as appdata_temp:
             exe_dir = Path(exe_temp)
             appdata_dir = Path(appdata_temp) / "BahiAI"
             appdata_dir.mkdir()
-            exe_env = exe_dir / ".env"
             appdata_env = appdata_dir / ".env"
-            exe_env.write_text("GOOGLE_API_KEY=exe-key\n", encoding="utf-8")
             appdata_env.write_text("GOOGLE_API_KEY=appdata-key\n", encoding="utf-8")
             with (
                 patch("desktop_app.config.executable_dir", return_value=exe_dir),
                 patch("desktop_app.config.default_app_data_dir", return_value=appdata_dir),
             ):
-                self.assertEqual(config.app_env_path(), exe_env)
+                self.assertEqual(config.app_env_path(), exe_dir / ".env")
 
     def test_get_gemini_config_reloads_changed_env_file(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -56,6 +53,22 @@ class ConfigTests(unittest.TestCase):
                 self.assertEqual(config.get_gemini_config(), ("first", "model-a"))
                 env_path.write_text("GOOGLE_API_KEY=second\nGEMINI_MODEL=model-b\n", encoding="utf-8")
                 self.assertEqual(config.get_gemini_config(), ("second", "model-b"))
+
+    def test_load_runtime_env_does_not_create_appdata_env(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            exe_dir = Path(temp_dir) / "Program Files (x86)" / "BahiAI"
+            appdata_dir = Path(temp_dir) / "AppData" / "Local" / "BahiAI"
+            exe_dir.mkdir(parents=True)
+            appdata_dir.mkdir(parents=True)
+            with (
+                patch("desktop_app.config.executable_dir", return_value=exe_dir),
+                patch("desktop_app.config.default_app_data_dir", return_value=appdata_dir),
+                patch("desktop_app.config.is_portable_mode", return_value=False),
+            ):
+                chosen_path = config.load_runtime_env()
+
+            self.assertEqual(chosen_path, exe_dir / ".env")
+            self.assertFalse((appdata_dir / ".env").exists())
 
 
 if __name__ == "__main__":

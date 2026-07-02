@@ -4,7 +4,7 @@
 #define MyAppExeName "BahiAI.exe"
 
 [Setup]
-AppId={{E6F74D2B-8BA4-4CE1-B341-2679F128A3DF}
+AppId={{E6F74D2B-8BA4-4CE1-B341-2679F128A3DF}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
