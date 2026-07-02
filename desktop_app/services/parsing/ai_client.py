@@ -27,7 +27,7 @@ class AIRateLimitError(AIClientError):
 
 def invoke_invoice_parser(raw_markdown: str, vendor_hint: str | None = None) -> dict[str, Any]:
     """Parse extracted digital-PDF text through Gemini's direct JSON-schema API."""
-    api_key, _ = get_gemini_config()
+    api_key, _model = get_gemini_config()
     if not api_key:
         raise RuntimeError("GOOGLE_API_KEY is not configured. Please add your Gemini API key in the .env file.")
 
@@ -44,31 +44,32 @@ def invoke_invoice_parser(raw_markdown: str, vendor_hint: str | None = None) -> 
 
 def invoke_invoice_text_json_parser(raw_markdown: str, vendor_hint: str | None = None) -> dict[str, Any]:
     """Call Gemini's direct JSON-schema API for extracted digital-PDF text."""
+    from google import genai
     from google.genai import types
 
-    api_key, model = get_gemini_config()
-    client = genai.Client(api_key=api_key)
     prompt = (
         f"{SYSTEM_PROMPT}\n\n"
         f"Vendor hint from filename: {vendor_hint or 'Unknown'}\n\n"
         f"Invoice text:\n\n{raw_markdown}\n\n"
         "Return only schema-valid JSON."
     )
-    response = client.models.generate_content(
-        model=model,
-        contents=[types.Part.from_text(text=prompt)],
-        config=types.GenerateContentConfig(
-            temperature=0.0,
-            response_mime_type="application/json",
-            response_schema=InvoiceData,
-        ),
-    )
+    api_key, model = get_gemini_config()
+    with genai.Client(api_key=api_key) as client:
+        response = client.models.generate_content(
+            model=model,
+            contents=[types.Part.from_text(text=prompt)],
+            config=types.GenerateContentConfig(
+                temperature=0.0,
+                response_mime_type="application/json",
+                response_schema=InvoiceData,
+            ),
+        )
     return invoice_response_to_dict(response)
 
 
 def invoke_invoice_file_parser(file_path: str | Path, mime_type: str, vendor_hint: str | None = None) -> dict[str, Any]:
     """Call Gemini once with inline file bytes and return an InvoiceData-shaped dictionary."""
-    api_key, model = get_gemini_config()
+    api_key, _model = get_gemini_config()
     if not api_key:
         raise RuntimeError("GOOGLE_API_KEY is not configured. Please add your Gemini API key in the .env file.")
 
@@ -77,15 +78,13 @@ def invoke_invoice_file_parser(file_path: str | Path, mime_type: str, vendor_hin
     try:
         from google.genai import types
 
-        client = genai.Client(api_key=api_key)
         prompt = (
             f"{VISUAL_SYSTEM_PROMPT}\n\n"
             f"Vendor hint from filename: {vendor_hint or path.name or 'Unknown'}\n"
             "Extract the invoice from the attached file and return only schema-valid JSON."
         )
-        response = client.models.generate_content(
-            model=model,
-            contents=[
+        return _generate_invoice_content(
+            [
                 types.Part.from_text(text=prompt),
                 types.Part.from_bytes(data=path.read_bytes(), mime_type=mime_type),
             ]

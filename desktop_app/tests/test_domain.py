@@ -24,7 +24,7 @@ class DomainHelperTests(unittest.TestCase):
 
     def test_parse_decimal_handles_currency_tokens_and_commas(self) -> None:
         """Currency labels and comma grouping should not break numeric parsing."""
-        self.assertEqual(parse_decimal("₹1,200"), 1200.0)
+        self.assertEqual(parse_decimal("â‚¹1,200"), 1200.0)
         self.assertEqual(parse_decimal("INR 5,310.50"), 5310.50)
         self.assertEqual(parse_decimal("Rs. 1,200"), 1200.0)
         self.assertEqual(parse_decimal("1,234.56"), 1234.56)
@@ -32,7 +32,7 @@ class DomainHelperTests(unittest.TestCase):
 
     def test_ai_parser_to_float_uses_shared_decimal_rules(self) -> None:
         """AI normalization should parse formatted currency through the shared helper."""
-        self.assertEqual(to_float("₹1,200"), 1200.0)
+        self.assertEqual(to_float("â‚¹1,200"), 1200.0)
         self.assertEqual(to_float("Rs. 1,200"), 1200.0)
         self.assertEqual(to_float("INR 5,310.50"), 5310.50)
         self.assertEqual(to_float(None), 0.0)
@@ -104,12 +104,12 @@ class DomainHelperTests(unittest.TestCase):
         """PDF table rows should become compact Markdown for Gemini context."""
         markdown = table_to_markdown([
             ["Item", "Qty", "Amount"],
-            ["Service\nPlan", "1", "â‚¹1,200.00"],
+            ["Service\nPlan", "1", "Ã¢â€šÂ¹1,200.00"],
             [None, "", ""],
         ], title="Invoice Items")
         self.assertIn("### Invoice Items", markdown)
         self.assertIn("| Item | Qty | Amount |", markdown)
-        self.assertIn("| Service Plan | 1 | â‚¹1,200.00 |", markdown)
+        self.assertIn("| Service Plan | 1 | Ã¢â€šÂ¹1,200.00 |", markdown)
 
     def test_extract_page_content_returns_markdown_tables(self) -> None:
         """Page extraction should preserve text and expose detected tables."""
@@ -251,7 +251,7 @@ class DomainHelperTests(unittest.TestCase):
             path.write_bytes(b"fake image bytes")
             with (
                 patch("desktop_app.services.parsing.ai_client.get_gemini_config", return_value=("test-key", "test-visual-model")),
-                patch("google.genai.Client", return_value=fake_client),
+                patch("google.genai.Client", return_value=fake_context),
             ):
                 result = invoke_invoice_file_parser(path, "image/png", "invoice.png")
 
@@ -271,7 +271,7 @@ class DomainHelperTests(unittest.TestCase):
 
         with (
             patch("desktop_app.services.parsing.ai_client.get_gemini_config", return_value=("test-key", "test-text-model")),
-            patch("google.genai.Client", return_value=fake_client),
+            patch("google.genai.Client", return_value=fake_context),
         ):
             result = invoke_invoice_parser("raw invoice text", "invoice.pdf")
 
@@ -291,7 +291,7 @@ class DomainHelperTests(unittest.TestCase):
 
         with (
             patch("desktop_app.services.parsing.ai_client.get_gemini_config", return_value=("test-key", "test-text-model")),
-            patch("google.genai.Client", return_value=fake_client),
+            patch("google.genai.Client", return_value=fake_context),
         ):
             with self.assertRaises(AIRateLimitError) as context:
                 invoke_invoice_parser("raw invoice text", "invoice.pdf")
